@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from ai_job_copilot_backend.schemas.documents import DocumentType
+
 
 class InterviewPackRequest(BaseModel):
     """生成面试题包时使用的请求体。"""
@@ -12,12 +14,37 @@ class InterviewPackRequest(BaseModel):
     target_role: str | None = None
 
 
+class InterviewQuestionSource(BaseModel):
+    """面试题引用的检索来源片段。"""
+
+    document_id: str
+    chunk_id: str
+    document_type: DocumentType
+    excerpt: str
+
+
 class InterviewQuestion(BaseModel):
     """结构化面试题，包含追问与参考回答。"""
 
     question: str
     follow_ups: list[str] = Field(default_factory=list)
     reference_answer: str
+    sources: list[InterviewQuestionSource] = Field(default_factory=list)
+
+
+class GeneratedInterviewQuestion(BaseModel):
+    """模型返回的中间题目结构。"""
+
+    question: str
+    follow_ups: list[str] = Field(default_factory=list)
+    reference_answer: str
+    source_chunk_ids: list[str] = Field(default_factory=list)
+
+
+class GeneratedInterviewPack(BaseModel):
+    """模型返回的中间面试包结构。"""
+
+    questions: list[GeneratedInterviewQuestion] = Field(default_factory=list)
 
 
 class InterviewPackResponse(BaseModel):

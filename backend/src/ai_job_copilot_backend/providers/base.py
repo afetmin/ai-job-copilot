@@ -8,6 +8,8 @@ InputPayloadT = TypeVar("InputPayloadT")
 ParsedDocumentT = TypeVar("ParsedDocumentT")
 EmbeddingInputT = TypeVar("EmbeddingInputT")
 EmbeddingVectorT = TypeVar("EmbeddingVectorT")
+GenerationInputT = TypeVar("GenerationInputT")
+GenerationOutputT = TypeVar("GenerationOutputT")
 RetrievalQueryT = TypeVar("RetrievalQueryT")
 RetrievalResultT = TypeVar("RetrievalResultT")
 
@@ -35,6 +37,18 @@ class EmbeddingProvider(ABC, Generic[EmbeddingInputT, EmbeddingVectorT]):
         values: Sequence[EmbeddingInputT],
     ) -> Sequence[EmbeddingVectorT]:
         """返回给定内容对应的向量结果。"""
+
+        raise NotImplementedError
+
+
+class GenerationProvider(ABC, Generic[GenerationInputT, GenerationOutputT]):
+    """根据提示词生成下游可消费的模型输出。"""
+
+    provider_name: str
+
+    @abstractmethod
+    async def generate(self, payload: GenerationInputT) -> GenerationOutputT:
+        """返回给定生成输入对应的模型输出。"""
 
         raise NotImplementedError
 

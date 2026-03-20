@@ -5,7 +5,15 @@ description = "Backend API for AI Job Copilot."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "chromadb>=1.1.0,<2.0.0",
+    "dashscope>=1.24.0,<2.0.0",
     "fastapi>=0.116.0,<1.0.0",
+    "langchain>=0.3.27,<1.0.0",
+    "langchain-chroma>=0.2.6,<1.0.0",
+    "langchain-community>=0.3.31,<1.0.0",
+    "langchain-openai>=0.3.35,<1.0.0",
+    "langchain-text-splitters>=0.3.11,<1.0.0",
+    "openai>=1.109.1,<2.0.0",
     "pymupdf==1.27.2",
     "pydantic-settings>=2.10.1,<3.0.0",
     "uvicorn>=0.35.0,<1.0.0",
@@ -57,4 +65,36 @@ disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
 module = "fitz"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "chromadb"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "chromadb.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_chroma"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_openai"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_community.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "langchain_text_splitters"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "dashscope"
 ignore_missing_imports = true
