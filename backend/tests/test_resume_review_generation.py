@@ -3,12 +3,12 @@ from collections.abc import AsyncIterator
 
 import pytest
 
+from ai_job_copilot_backend.providers.base import GenerationProvider
 from ai_job_copilot_backend.resume_review.service import (
+    MissingRetrievalContextError,
     ResumeReviewGenerationService,
     ResumeReviewPromptBuilder,
-    MissingRetrievalContextError,
 )
-from ai_job_copilot_backend.providers.base import GenerationProvider
 from ai_job_copilot_backend.schemas.resume_review import ResumeReviewRequest
 from ai_job_copilot_backend.schemas.retrieval import (
     RetrievalChunk,
@@ -192,7 +192,9 @@ async def test_stream_generation_service_emits_progress_and_completed_events() -
                     {
                         "issue": "简历中的检索经历缺少结果表达。",
                         "jd_alignment": "JD 需要看到系统设计和交付结果。",
-                        "rewrite_example": "主导检索增强链路设计与交付，补充系统目标、评估方式和上线结果。",
+                        "rewrite_example": (
+                            "主导检索增强链路设计与交付，补充系统目标、评估方式和上线结果。"
+                        ),
                         "source_chunk_ids": ["resume-001:chunk:0", "jd-001:chunk:1"],
                     }
                 ]

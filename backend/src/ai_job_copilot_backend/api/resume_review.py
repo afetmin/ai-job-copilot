@@ -11,12 +11,12 @@ from fastapi.responses import StreamingResponse
 from ai_job_copilot_backend.core.settings import Settings
 from ai_job_copilot_backend.resume_review.service import (
     ResumeReviewAnalysisService,
+    ResumeReviewChatService,
     ResumeReviewGenerationService,
 )
 from ai_job_copilot_backend.schemas.resume_review import (
     ResumeReviewAnalysisRequest,
     ResumeReviewAnalysisStreamEvent,
-    ResumeReviewChatContext,
     ResumeReviewChatRequest,
     ResumeReviewChatStreamEvent,
     ResumeReviewRequest,
@@ -65,59 +65,6 @@ class ResumeReviewChatStreamService(Protocol):
         """按顺序返回统一聊天事件。"""
 
 
-class ResumeReviewChatServiceAdapter:
-    """用现有初始分析服务提供统一 chat 路由的最小兼容实现。"""
-
-    def __init__(self, analysis_service: ResumeReviewAnalysisService) -> None:
-        self._analysis_service = analysis_service
-
-    async def stream_resume_review_chat(
-        self,
-        request: ResumeReviewChatRequest,
-    ) -> AsyncIterator[ResumeReviewChatStreamEvent]:
-        analysis_request = ResumeReviewAnalysisRequest(
-            review_id=request.review_id,
-            request_id=request.request_id,
-            resume_document_id=request.resume_document_id,
-            job_description_document_id=request.job_description_document_id,
-            suggestion_count=request.suggestion_count,
-            target_role=request.target_role,
-            runtime_model_config=request.runtime_model_config,
-        )
-
-        async for event in self._analysis_service.stream_resume_review_analysis(
-            analysis_request,
-        ):
-            yield self._map_event(event)
-
-    @staticmethod
-    def _map_event(
-        event: ResumeReviewAnalysisStreamEvent,
-    ) -> ResumeReviewChatStreamEvent:
-        context = None
-        if event.metadata is not None:
-            context = ResumeReviewChatContext(
-                review_id=event.metadata.review_id,
-                request_id=event.metadata.request_id,
-                target_role=event.metadata.target_role,
-                suggestion_count=event.metadata.suggestion_count,
-                resume_chunk_count=event.metadata.resume_chunk_count,
-                job_description_chunk_count=event.metadata.job_description_chunk_count,
-                focus_points=event.metadata.focus_points,
-            )
-
-        stage = "context" if event.stage == "metadata" else event.stage
-        return ResumeReviewChatStreamEvent(
-            review_id=event.review_id,
-            request_id=event.request_id,
-            stage=stage,
-            context=context,
-            citation=event.citation,
-            delta=event.delta,
-            message=event.message,
-        )
-
-
 def get_resume_review_generation_service(request: Request) -> ResumeReviewGenerationService:
     """从应用配置构建简历优化建议生成服务。"""
 
@@ -133,9 +80,10 @@ def get_resume_review_analysis_service(request: Request) -> ResumeReviewAnalysis
 
 
 def get_resume_review_chat_service(request: Request) -> ResumeReviewChatStreamService:
-    """基于现有初始分析服务提供统一 chat 路由的兼容适配。"""
+    """从应用配置构建统一聊天服务。"""
 
-    return ResumeReviewChatServiceAdapter(get_resume_review_analysis_service(request))
+    settings = cast(Settings, request.app.state.settings)
+    return ResumeReviewChatService.from_settings(settings)
 
 
 def _format_sse(event: SSEEvent) -> str:

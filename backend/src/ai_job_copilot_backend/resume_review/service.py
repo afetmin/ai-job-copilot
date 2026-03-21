@@ -17,12 +17,16 @@ from ai_job_copilot_backend.schemas.resume_review import (
     ResumeReviewAnalysisMetadata,
     ResumeReviewAnalysisRequest,
     ResumeReviewAnalysisStreamEvent,
+    ResumeReviewChatContext,
+    ResumeReviewChatMessageInput,
+    ResumeReviewChatRequest,
+    ResumeReviewChatStreamEvent,
     ResumeReviewCitation,
     ResumeReviewRequest,
     ResumeReviewResponse,
+    ResumeReviewStreamEvent,
     ResumeReviewSuggestion,
     ResumeReviewSuggestionSource,
-    ResumeReviewStreamEvent,
     RuntimeModelConfig,
 )
 from ai_job_copilot_backend.schemas.retrieval import (
@@ -403,6 +407,66 @@ class ResumeReviewAnalysisPromptBuilder:
         return "\n".join(parts)
 
 
+def _format_chat_history(messages: list[ResumeReviewChatMessageInput]) -> str:
+    if not messages:
+        return "- user: 请先给我整体分析和修改建议。"
+
+    lines = [f"- {message.role}: {message.content}" for message in messages]
+    return "\n".join(lines)
+
+
+def _latest_user_message(messages: list[ResumeReviewChatMessageInput]) -> str:
+    for message in reversed(messages):
+        if message.role == "user":
+            return message.content
+
+    return "请先给我整体分析和修改建议。"
+
+
+class ResumeReviewChatPromptBuilder:
+    """负责把统一聊天上下文整理成 Markdown 提示词。"""
+
+    def build(
+        self,
+        *,
+        request: ResumeReviewChatRequest,
+        resume_context: RetrievalContext,
+        job_description_context: RetrievalContext,
+    ) -> str:
+        target_role = request.target_role or "目标岗位未指定"
+        latest_user_message = _latest_user_message(request.messages)
+        is_initial_turn = not any(
+            message.role == "assistant" and message.content.strip() for message in request.messages
+        )
+
+        response_shape = (
+            (
+                "请给出首轮整体分析，包含匹配判断、主要问题、与 JD 的错位点、"
+                "优先修改建议和可直接替换的改写示例。"
+            )
+            if is_initial_turn
+            else "请直接回答用户本轮追问，延续之前对话，不要把整份初始报告完整重复一遍。"
+        )
+
+        return (
+            "你是一个资深求职辅导助手，请根据简历片段、岗位描述片段和现有对话，"
+            "输出用于聊天界面的 Markdown。\n\n"
+            "输出要求：\n"
+            "1. 只输出 Markdown，不要输出 JSON、代码块或额外解释。\n"
+            "2. 不要编造上下文中没有出现的信息。\n"
+            f"3. {response_shape}\n"
+            f"4. 本轮至少覆盖 {request.suggestion_count} 条高优先级建议或回答要点。\n\n"
+            f"目标岗位：{target_role}\n"
+            f"用户本轮问题：{latest_user_message}\n\n"
+            "【历史对话】\n"
+            f"{_format_chat_history(request.messages)}\n\n"
+            "【简历检索片段】\n"
+            f"{ResumeReviewAnalysisPromptBuilder._format_context(resume_context)}\n\n"
+            "【职位描述检索片段】\n"
+            f"{ResumeReviewAnalysisPromptBuilder._format_context(job_description_context)}"
+        )
+
+
 ResumeReviewAnalysisProviderFactory = Callable[
     [RuntimeModelConfig | None],
     GenerationProvider[str, str],
@@ -556,3 +620,125 @@ class ResumeReviewAnalysisService:
                     )
                 )
         return citations
+
+
+class ResumeReviewChatService:
+    """生成统一聊天流中的 assistant 消息。"""
+
+    def __init__(
+        self,
+        *,
+        retrieval_service: RetrievalContextLoader,
+        generation_provider_factory: ResumeReviewAnalysisProviderFactory,
+        prompt_builder: ResumeReviewChatPromptBuilder | None = None,
+        retrieval_limit: int = 4,
+    ) -> None:
+        self._retrieval_service = retrieval_service
+        self._generation_provider_factory = generation_provider_factory
+        self._prompt_builder = prompt_builder or ResumeReviewChatPromptBuilder()
+        self._retrieval_limit = retrieval_limit
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> ResumeReviewChatService:
+        """根据配置构建统一聊天服务。"""
+
+        def generation_provider_factory(
+            runtime_model_config: RuntimeModelConfig | None,
+        ) -> GenerationProvider[str, str]:
+            return create_generation_provider(
+                settings,
+                runtime_model_config=runtime_model_config,
+            )
+
+        return cls(
+            retrieval_service=RetrievalService.from_settings(settings),
+            generation_provider_factory=generation_provider_factory,
+            retrieval_limit=settings.interview_retrieval_limit,
+        )
+
+    async def stream_resume_review_chat(
+        self,
+        request: ResumeReviewChatRequest,
+    ) -> AsyncIterator[ResumeReviewChatStreamEvent]:
+        """按 SSE 友好的事件流输出统一聊天响应。"""
+
+        request_id = request.request_id or request.review_id
+        yield ResumeReviewChatStreamEvent(
+            review_id=request.review_id,
+            request_id=request_id,
+            stage="start",
+        )
+
+        try:
+            resume_context, job_description_context = await _load_contexts(
+                self._retrieval_service,
+                request,
+                self._retrieval_limit,
+            )
+
+            context = ResumeReviewChatContext(
+                review_id=request.review_id,
+                request_id=request_id,
+                target_role=request.target_role,
+                suggestion_count=request.suggestion_count,
+                resume_chunk_count=len(resume_context.chunks),
+                job_description_chunk_count=len(job_description_context.chunks),
+                focus_points=self._build_focus_points(request),
+            )
+            yield ResumeReviewChatStreamEvent(
+                review_id=request.review_id,
+                request_id=request_id,
+                stage="context",
+                context=context,
+            )
+
+            for citation in ResumeReviewAnalysisService._build_citations(
+                resume_context=resume_context,
+                job_description_context=job_description_context,
+            ):
+                yield ResumeReviewChatStreamEvent(
+                    review_id=request.review_id,
+                    request_id=request_id,
+                    stage="citation",
+                    citation=citation,
+                )
+
+            prompt = self._prompt_builder.build(
+                request=request,
+                resume_context=resume_context,
+                job_description_context=job_description_context,
+            )
+            generation_provider = self._generation_provider_factory(
+                request.runtime_model_config,
+            )
+            async for delta in generation_provider.stream_generate(prompt):
+                yield ResumeReviewChatStreamEvent(
+                    review_id=request.review_id,
+                    request_id=request_id,
+                    stage="delta",
+                    delta=delta,
+                )
+
+            yield ResumeReviewChatStreamEvent(
+                review_id=request.review_id,
+                request_id=request_id,
+                stage="done",
+            )
+        except Exception as exc:
+            yield ResumeReviewChatStreamEvent(
+                review_id=request.review_id,
+                request_id=request_id,
+                stage="error",
+                message=str(exc),
+            )
+
+    @staticmethod
+    def _build_focus_points(request: ResumeReviewChatRequest) -> list[str]:
+        focus_points = [
+            "优先回答用户当前最关心的修改问题",
+            "继续围绕可量化结果和 JD 匹配度给建议",
+        ]
+        if request.target_role:
+            focus_points.insert(0, f"围绕 {request.target_role} 的核心要求展开")
+        focus_points.append(f"本轮按 {request.suggestion_count} 条高优先级建议或要点组织输出")
+        return focus_points
