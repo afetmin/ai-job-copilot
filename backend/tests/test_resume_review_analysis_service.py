@@ -62,6 +62,7 @@ class StubRetrievalService:
     ) -> None:
         self._resume_context = resume_context
         self._job_context = job_context
+        self.queries: list[RetrievalQuery] = []
 
     async def retrieve_context(
         self,
@@ -69,6 +70,7 @@ class StubRetrievalService:
         limit: int = 5,
     ) -> RetrievalContext:
         _ = limit
+        self.queries.append(query)
         if query.document_type == "resume":
             return self._resume_context
         if query.document_type == "job_description":
@@ -270,6 +272,51 @@ async def test_chat_service_includes_follow_up_history_in_prompt() -> None:
     assert "请重点改写项目经历部分。" in prompt
     assert "这里是第一轮分析。" in prompt
     assert "不要把整份初始报告完整重复一遍" in prompt
+
+
+@pytest.mark.anyio
+async def test_chat_service_retargets_retrieval_queries_to_latest_user_message() -> None:
+    retrieval_service = StubRetrievalService(
+        resume_context=_build_resume_context(),
+        job_context=_build_job_context(),
+    )
+    generation_provider = StubGenerationProvider("继续回答追问。")
+    service = ResumeReviewChatService(
+        retrieval_service=retrieval_service,
+        generation_provider_factory=lambda runtime_model_config: generation_provider,
+    )
+
+    _ = [
+        event
+        async for event in service.stream_resume_review_chat(
+            ResumeReviewChatRequest(
+                review_id="pack-003",
+                request_id="req-003",
+                resume_document_id="resume-001",
+                job_description_document_id="jd-001",
+                suggestion_count=2,
+                target_role="Backend Engineer",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "先给我整体分析。",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "这里是第一轮分析。",
+                    },
+                    {
+                        "role": "user",
+                        "content": "请重点改写项目经历部分。",
+                    },
+                ],
+            )
+        )
+    ]
+
+    assert len(retrieval_service.queries) == 2
+    assert "请重点改写项目经历部分。" in retrieval_service.queries[0].query
+    assert "请重点改写项目经历部分。" in retrieval_service.queries[1].query
 
 
 @pytest.mark.anyio

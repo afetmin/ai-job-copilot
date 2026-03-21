@@ -43,6 +43,31 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function createControlledSseResponse() {
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(nextController) {
+      controller = nextController;
+    },
+  });
+  const encoder = new TextEncoder();
+
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+      },
+    }),
+    push(chunk: string) {
+      controller?.enqueue(encoder.encode(chunk));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
 describe("ResultsWorkspace", () => {
   const fetchMock = vi.fn();
   const packRecord = {
@@ -319,5 +344,87 @@ describe("ResultsWorkspace", () => {
     ]);
 
     expect(await screen.findByText("第二个对话加载完成")).toBeInTheDocument();
+  });
+
+  it("does not leak an in-flight stream into a newly selected pack", async () => {
+    const controlledStream = createControlledSseResponse();
+
+    dbMocks.listResumeReviewsMock.mockResolvedValue([packRecord, secondPackRecord]);
+    dbMocks.listMessagesForReviewMock.mockImplementation(async (reviewId: string) => {
+      if (reviewId === "pack-2") {
+        return [
+          {
+            messageId: "initial_analysis:pack-2",
+            reviewId: "pack-2",
+            role: "assistant",
+            kind: "initial_analysis",
+            content: "第二个对话保持原样",
+            status: "done",
+            citations: [],
+            createdAt: 12,
+            updatedAt: 12,
+          },
+        ];
+      }
+
+      return [];
+    });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(controlledStream.response);
+
+    render(<ResultsWorkspace requestId="req-test-123" />);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/resume-reviews/chat",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /ai product engineer/i }));
+
+    expect(await screen.findByText("第二个对话保持原样")).toBeInTheDocument();
+
+    controlledStream.push(
+      'event: delta\ndata: {"delta":"旧对话不应该串到新对话"}\n\n'
+        + 'event: done\ndata: {"review_id":"req-test-123"}\n\n',
+    );
+    controlledStream.close();
+
+    await waitFor(() => {
+      expect(screen.queryByText("旧对话不应该串到新对话")).not.toBeInTheDocument();
+    });
+  });
+
+  it("recovers the composer after a transport-level stream failure", async () => {
+    render(<ResultsWorkspace requestId="req-test-123" />);
+
+    expect(await screen.findByRole("heading", { name: "初始分析" })).toBeInTheDocument();
+
+    const sendButton = screen.getByRole("button", { name: "发送" });
+    fireEvent.change(screen.getByLabelText("输入修改追问"), {
+      target: { value: "请重点改写项目经历。" },
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, {
+        status: 200,
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+        },
+      }),
+    );
+
+    fireEvent.click(sendButton);
+
+    await waitFor(() =>
+      expect(screen.getAllByText("追问发送失败，请稍后重试。").length).toBeGreaterThan(0),
+    );
+
+    fireEvent.change(screen.getByLabelText("输入修改追问"), {
+      target: { value: "请再给我一个改写版本。" },
+    });
+
+    expect(screen.getByRole("button", { name: "发送" })).toBeEnabled();
   });
 });

@@ -63,13 +63,38 @@ class ResumeReviewContextRequest(Protocol):
     target_role: str | None
 
 
+def _latest_user_message_content(
+    messages: list[ResumeReviewChatMessageInput] | None,
+) -> str | None:
+    if not messages:
+        return None
+
+    for message in reversed(messages):
+        if message.role == "user" and message.content.strip():
+            return message.content
+
+    return None
+
+
 def _build_resume_query(request: ResumeReviewContextRequest) -> str:
     target_role = request.target_role or "目标岗位"
+    latest_user_message = _latest_user_message_content(
+        getattr(request, "messages", None),
+    )
+    if latest_user_message:
+        return f"{target_role} {latest_user_message} 项目经历 技术技能 业务成果 领导力"
+
     return f"{target_role} 项目经历 技术技能 业务成果 领导力"
 
 
 def _build_job_description_query(request: ResumeReviewContextRequest) -> str:
     target_role = request.target_role or "目标岗位"
+    latest_user_message = _latest_user_message_content(
+        getattr(request, "messages", None),
+    )
+    if latest_user_message:
+        return f"{target_role} {latest_user_message} 岗位职责 技术要求 任职要求 业务目标"
+
     return f"{target_role} 岗位职责 技术要求 任职要求 业务目标"
 
 
@@ -416,11 +441,7 @@ def _format_chat_history(messages: list[ResumeReviewChatMessageInput]) -> str:
 
 
 def _latest_user_message(messages: list[ResumeReviewChatMessageInput]) -> str:
-    for message in reversed(messages):
-        if message.role == "user":
-            return message.content
-
-    return "请先给我整体分析和修改建议。"
+    return _latest_user_message_content(messages) or "请先给我整体分析和修改建议。"
 
 
 class ResumeReviewChatPromptBuilder:
