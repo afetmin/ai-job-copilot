@@ -1,5 +1,7 @@
 """面试题包生成链路的基础请求与响应模型。"""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from ai_job_copilot_backend.schemas.documents import DocumentType
@@ -52,3 +54,24 @@ class InterviewPackResponse(BaseModel):
 
     request_id: str
     questions: list[InterviewQuestion]
+
+
+InterviewPackStreamStage = Literal[
+    "started",
+    "retrieval_completed",
+    "generation_delta",
+    "completed",
+    "error",
+]
+
+
+class InterviewPackStreamEvent(BaseModel):
+    """后端 SSE 接口输出的标准事件结构。"""
+
+    request_id: str
+    stage: InterviewPackStreamStage
+    resume_chunk_count: int | None = None
+    job_description_chunk_count: int | None = None
+    delta: str | None = None
+    data: InterviewPackResponse | None = None
+    message: str | None = None

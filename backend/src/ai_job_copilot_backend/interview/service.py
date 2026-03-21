@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Protocol, cast
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from ai_job_copilot_backend.schemas.interview import (
     GeneratedInterviewPack,
     InterviewPackRequest,
     InterviewPackResponse,
+    InterviewPackStreamEvent,
     InterviewQuestion,
     InterviewQuestionSource,
 )
@@ -122,6 +124,99 @@ class InterviewPackGenerationService:
     ) -> InterviewPackResponse:
         """生成结构化面试题包。"""
 
+        request_id = str(uuid4())
+        resume_context, job_description_context = await self._load_contexts(request)
+        prompt = self._prompt_builder.build(
+            request=request,
+            resume_context=resume_context,
+            job_description_context=job_description_context,
+        )
+        raw_output = await self._generation_provider.generate(prompt)
+        parsed_output = self._parse_generation_output(raw_output, request.question_count)
+
+        source_lookup = self._build_source_lookup(
+            resume_context=resume_context,
+            job_description_context=job_description_context,
+        )
+        return self._build_interview_pack_response(
+            request_id=request_id,
+            parsed_output=parsed_output,
+            source_lookup=source_lookup,
+        )
+
+    async def stream_interview_pack(
+        self,
+        request: InterviewPackRequest,
+    ) -> AsyncIterator[InterviewPackStreamEvent]:
+        """按 SSE 友好的事件流输出面试题包生成进度。"""
+
+        request_id = str(uuid4())
+        yield InterviewPackStreamEvent(
+            request_id=request_id,
+            stage="started",
+        )
+
+        try:
+            resume_context, job_description_context = await self._load_contexts(request)
+            yield InterviewPackStreamEvent(
+                request_id=request_id,
+                stage="retrieval_completed",
+                resume_chunk_count=len(resume_context.chunks),
+                job_description_chunk_count=len(job_description_context.chunks),
+            )
+
+            prompt = self._prompt_builder.build(
+                request=request,
+                resume_context=resume_context,
+                job_description_context=job_description_context,
+            )
+
+            raw_output_parts: list[str] = []
+            async for delta in self._generation_provider.stream_generate(prompt):
+                raw_output_parts.append(delta)
+                yield InterviewPackStreamEvent(
+                    request_id=request_id,
+                    stage="generation_delta",
+                    delta=delta,
+                )
+
+            raw_output = "".join(raw_output_parts)
+            parsed_output = self._parse_generation_output(raw_output, request.question_count)
+            source_lookup = self._build_source_lookup(
+                resume_context=resume_context,
+                job_description_context=job_description_context,
+            )
+            response = self._build_interview_pack_response(
+                request_id=request_id,
+                parsed_output=parsed_output,
+                source_lookup=source_lookup,
+            )
+            yield InterviewPackStreamEvent(
+                request_id=request_id,
+                stage="completed",
+                data=response,
+            )
+        except Exception as exc:
+            yield InterviewPackStreamEvent(
+                request_id=request_id,
+                stage="error",
+                message=str(exc),
+            )
+
+    @staticmethod
+    def _build_resume_query(request: InterviewPackRequest) -> str:
+        target_role = request.target_role or "面试岗位"
+        return f"{target_role} 项目经历 技术技能 业务成果 领导力"
+
+    @staticmethod
+    def _build_job_description_query(request: InterviewPackRequest) -> str:
+        target_role = request.target_role or "面试岗位"
+        return f"{target_role} 岗位职责 技术要求 任职要求 业务目标"
+
+    async def _load_contexts(
+        self,
+        request: InterviewPackRequest,
+    ) -> tuple[RetrievalContext, RetrievalContext]:
         resume_context = await self._retrieval_service.retrieve_context(
             RetrievalQuery(
                 query=self._build_resume_query(request),
@@ -144,48 +239,7 @@ class InterviewPackGenerationService:
         if not job_description_context.chunks:
             raise MissingRetrievalContextError("未找到 job_description 的可用检索上下文")
 
-        prompt = self._prompt_builder.build(
-            request=request,
-            resume_context=resume_context,
-            job_description_context=job_description_context,
-        )
-        raw_output = await self._generation_provider.generate(prompt)
-        parsed_output = self._parse_generation_output(raw_output, request.question_count)
-
-        source_lookup = self._build_source_lookup(
-            resume_context=resume_context,
-            job_description_context=job_description_context,
-        )
-
-        questions: list[InterviewQuestion] = []
-        for generated_question in parsed_output.questions:
-            sources = self._resolve_sources(
-                source_chunk_ids=generated_question.source_chunk_ids,
-                source_lookup=source_lookup,
-            )
-            questions.append(
-                InterviewQuestion(
-                    question=generated_question.question,
-                    follow_ups=generated_question.follow_ups,
-                    reference_answer=generated_question.reference_answer,
-                    sources=sources,
-                )
-            )
-
-        return InterviewPackResponse(
-            request_id=str(uuid4()),
-            questions=questions,
-        )
-
-    @staticmethod
-    def _build_resume_query(request: InterviewPackRequest) -> str:
-        target_role = request.target_role or "面试岗位"
-        return f"{target_role} 项目经历 技术技能 业务成果 领导力"
-
-    @staticmethod
-    def _build_job_description_query(request: InterviewPackRequest) -> str:
-        target_role = request.target_role or "面试岗位"
-        return f"{target_role} 岗位职责 技术要求 任职要求 业务目标"
+        return resume_context, job_description_context
 
     @staticmethod
     def _parse_generation_output(
@@ -220,6 +274,33 @@ class InterviewPackGenerationService:
         for chunk in [*resume_context.chunks, *job_description_context.chunks]:
             source_lookup[chunk.chunk_id] = chunk
         return source_lookup
+
+    def _build_interview_pack_response(
+        self,
+        *,
+        request_id: str,
+        parsed_output: GeneratedInterviewPack,
+        source_lookup: dict[str, RetrievalChunk],
+    ) -> InterviewPackResponse:
+        questions: list[InterviewQuestion] = []
+        for generated_question in parsed_output.questions:
+            sources = self._resolve_sources(
+                source_chunk_ids=generated_question.source_chunk_ids,
+                source_lookup=source_lookup,
+            )
+            questions.append(
+                InterviewQuestion(
+                    question=generated_question.question,
+                    follow_ups=generated_question.follow_ups,
+                    reference_answer=generated_question.reference_answer,
+                    sources=sources,
+                )
+            )
+
+        return InterviewPackResponse(
+            request_id=request_id,
+            questions=questions,
+        )
 
     @staticmethod
     def _resolve_sources(

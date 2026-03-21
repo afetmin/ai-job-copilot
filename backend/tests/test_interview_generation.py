@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -75,10 +76,17 @@ class StubGenerationProvider(GenerationProvider[str, str]):
     def __init__(self, payload: str) -> None:
         self._payload = payload
         self.prompts: list[str] = []
+        self.stream_payloads: list[str] = []
 
     async def generate(self, prompt: str) -> str:
         self.prompts.append(prompt)
         return self._payload
+
+    async def stream_generate(self, prompt: str) -> AsyncIterator[str]:
+        self.stream_payloads.append(prompt)
+        midpoint = max(len(self._payload) // 2, 1)
+        yield self._payload[:midpoint]
+        yield self._payload[midpoint:]
 
 
 def test_prompt_builder_includes_resume_and_job_context_chunks() -> None:
@@ -170,3 +178,55 @@ async def test_generation_service_raises_clear_error_when_resume_context_is_miss
                 question_count=1,
             )
         )
+
+
+@pytest.mark.anyio
+async def test_stream_generation_service_emits_progress_and_completed_events() -> None:
+    retrieval_service = StubRetrievalService(
+        resume_context=_build_resume_context(),
+        job_context=_build_job_context(),
+    )
+    generation_provider = StubGenerationProvider(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question": "How did you design the retrieval architecture?",
+                        "follow_ups": ["How did you evaluate relevance quality?"],
+                        "reference_answer": "I combined structured chunking with retrieval.",
+                        "source_chunk_ids": ["resume-001:chunk:0", "jd-001:chunk:1"],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        )
+    )
+    service = InterviewPackGenerationService(
+        retrieval_service=retrieval_service,
+        generation_provider=generation_provider,
+    )
+
+    events = [
+        event
+        async for event in service.stream_interview_pack(
+            InterviewPackRequest(
+                resume_document_id="resume-001",
+                job_description_document_id="jd-001",
+                question_count=1,
+                target_role="Backend Engineer",
+            )
+        )
+    ]
+
+    assert [event.stage for event in events] == [
+        "started",
+        "retrieval_completed",
+        "generation_delta",
+        "generation_delta",
+        "completed",
+    ]
+    assert events[1].resume_chunk_count == 1
+    assert events[1].job_description_chunk_count == 1
+    assert events[-1].data is not None
+    assert len(events[-1].data.questions) == 1
+    assert generation_provider.stream_payloads

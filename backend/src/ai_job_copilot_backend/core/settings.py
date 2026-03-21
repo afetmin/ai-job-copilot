@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     dashscope_api_key: str = ""
+    llm_provider: Literal["openai", "dashscope"] | str = ""
     llm_model: str = ""
+    llm_api_key: str = ""
+    llm_base_url: str = ""
     llm_temperature: float = 0.2
     chroma_persist_directory: str = "./data/chroma_db"
     chroma_collection_name: str = "documents"

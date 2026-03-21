@@ -1,7 +1,7 @@
 """供后续录入与检索功能复用的 Provider 抽象契约。"""
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Generic, TypeVar
 
 InputPayloadT = TypeVar("InputPayloadT")
@@ -51,6 +51,14 @@ class GenerationProvider(ABC, Generic[GenerationInputT, GenerationOutputT]):
         """返回给定生成输入对应的模型输出。"""
 
         raise NotImplementedError
+
+    def stream_generate(
+        self,
+        payload: GenerationInputT,
+    ) -> AsyncIterator[GenerationOutputT]:
+        """按流式方式返回给定生成输入对应的模型输出。"""
+
+        raise NotImplementedError("当前 generation provider 不支持流式输出")
 
 
 class RetrievalProvider(ABC, Generic[RetrievalQueryT, RetrievalResultT]):
