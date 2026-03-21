@@ -24,7 +24,7 @@ class FakeAsyncOpenAI:
     def __init__(self, *, api_key: str, base_url: str) -> None:
         self.api_key = api_key
         self.base_url = base_url
-        self.responses = FakeResponsesAPI('{"questions": []}')
+        self.responses = FakeResponsesAPI('{"suggestions": []}')
         self.__class__.instances.append(self)
 
 
@@ -46,7 +46,7 @@ def _build_real_llm_settings() -> Settings:
         or not loaded_settings.llm_model
         or not loaded_settings.llm_api_key
     ):
-        pytest.fail(
+        pytest.skip(
             "必须先设置 AI_JOB_COPILOT_LLM_PROVIDER、"
             "AI_JOB_COPILOT_LLM_MODEL 和 AI_JOB_COPILOT_LLM_API_KEY"
         )
@@ -102,7 +102,7 @@ async def test_create_generation_provider_uses_responses_api(
 
     output = await provider.generate("生成一个 JSON")
 
-    assert output == '{"questions": []}'
+    assert output == '{"suggestions": []}'
     assert len(FakeAsyncOpenAI.instances) == 1
     client = FakeAsyncOpenAI.instances[0]
     assert client.api_key == "test-key"
@@ -112,7 +112,7 @@ async def test_create_generation_provider_uses_responses_api(
     assert client.responses.calls[0]["input"] == [
         {
             "role": "developer",
-            "content": "你是一个结构化输出助手，只返回合法 JSON，不要输出额外说明。",
+            "content": "你是一个严谨的输出助手，必须严格遵循用户给定的格式与边界。",
         },
         {"role": "user", "content": "生成一个 JSON"},
     ]
@@ -124,8 +124,8 @@ async def test_generation_provider_calls_real_llm() -> None:
     provider = generation.create_generation_provider(settings)
 
     output = await provider.generate(
-        '请只返回合法 JSON，格式严格为 {"questions": []}。不要输出解释，不要输出 Markdown。'
+        '请只返回合法 JSON，格式严格为 {"suggestions": []}。不要输出解释，不要输出 Markdown。'
     )
     parsed_output = _normalize_json_payload(output)
 
-    assert parsed_output == {"questions": []}
+    assert parsed_output == {"suggestions": []}

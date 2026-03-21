@@ -6,16 +6,31 @@ const { pushMock, scrollIntoViewMock } = vi.hoisted(() => ({
   scrollIntoViewMock: vi.fn(),
 }));
 
+const { resolveResumeReviewAccessGateMock } = vi.hoisted(() => ({
+  resolveResumeReviewAccessGateMock: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: pushMock,
   }),
 }));
 
+vi.mock("@/lib/resume-review-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/resume-review-access")>(
+    "@/lib/resume-review-access",
+  );
+
+  return {
+    ...actual,
+    resolveResumeReviewAccessGate: resolveResumeReviewAccessGateMock,
+  };
+});
+
 import {
-  INTERVIEW_PACK_SESSION_STORAGE_KEY,
-  InterviewPackForm,
-} from "./interview-pack-form";
+  RESUME_REVIEW_SESSION_STORAGE_KEY,
+  ResumeReviewForm,
+} from "./resume-review-form";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -43,13 +58,19 @@ function fillRequiredInputs() {
   openStep("04 提交生成");
 }
 
-describe("InterviewPackForm", () => {
+describe("ResumeReviewForm", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
     fetchMock.mockReset();
     pushMock.mockReset();
     scrollIntoViewMock.mockReset();
+    resolveResumeReviewAccessGateMock.mockReset();
+    resolveResumeReviewAccessGateMock.mockResolvedValue({
+      remainingFreeAnalyses: 2,
+      requiresUserModelConfig: false,
+      hasLocalProviderSettings: false,
+    });
     window.sessionStorage.clear();
     vi.stubGlobal("fetch", fetchMock);
     Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
@@ -64,7 +85,7 @@ describe("InterviewPackForm", () => {
   });
 
   it("shows the first step by default and switches panels from the stepper", () => {
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     expect(screen.getByRole("heading", { name: "简历材料" })).toBeInTheDocument();
 
@@ -84,7 +105,7 @@ describe("InterviewPackForm", () => {
       "Backend role requires strong systems design.",
     ],
   ])("keeps submit preview-only when %s is the only completed main input", (providedLabel, providedValue) => {
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     if (providedLabel === "岗位描述") {
       openStep("02 岗位上下文");
@@ -96,9 +117,9 @@ describe("InterviewPackForm", () => {
 
     openStep("04 提交生成");
 
-    expect(screen.getByRole("button", { name: "生成面试包" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "开始分析简历" })).toBeDisabled();
     expect(
-      screen.getByText("当前只能预览提交流程。补齐简历和岗位材料后，生成按钮才会启用。"),
+      screen.getByText("当前只能预览提交流程。补齐简历和岗位材料后，分析按钮才会启用。"),
     ).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
@@ -112,11 +133,11 @@ describe("InterviewPackForm", () => {
       }),
     );
 
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     fillRequiredInputs();
 
-    const submitButton = screen.getByRole("button", { name: "生成面试包" });
+    const submitButton = screen.getByRole("button", { name: "开始分析简历" });
     fireEvent.click(submitButton);
 
     await waitFor(() => expect(submitButton).toBeDisabled());
@@ -126,12 +147,12 @@ describe("InterviewPackForm", () => {
         requestId: "req-test-123",
         resumeDocumentId: "resume-doc-1",
         jobDescriptionDocumentId: "jd-doc-1",
-        questionCount: 5,
+        suggestionCount: 5,
         targetRole: "Backend Engineer",
         streamPayload: {
           resume_document_id: "resume-doc-1",
           job_description_document_id: "jd-doc-1",
-          question_count: 5,
+          suggestion_count: 5,
           target_role: "Backend Engineer",
         },
       }),
@@ -140,58 +161,58 @@ describe("InterviewPackForm", () => {
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/results/req-test-123"));
   });
 
-  it("shows a validation error when questionCount is invalid", async () => {
-    render(<InterviewPackForm />);
+  it("shows a validation error when suggestionCount is invalid", async () => {
+    render(<ResumeReviewForm />);
 
     fillRequiredInputs();
     openStep("03 调整参数");
-    fireEvent.change(screen.getByLabelText("题目数量"), {
+    fireEvent.change(screen.getByLabelText("建议条数"), {
       target: { value: "0" },
     });
 
     openStep("04 提交生成");
-    fireEvent.click(screen.getByRole("button", { name: "生成面试包" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始分析简历" }));
 
     expect(
-      (await screen.findAllByText("题目数量必须是 1 到 20 之间的整数。")).length,
+      (await screen.findAllByText("建议条数必须是 1 到 20 之间的整数。")).length,
     ).toBeGreaterThan(0);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it("normalizes a blank questionCount to the default before submitting", async () => {
+  it("normalizes a blank suggestionCount to the default before submitting", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         requestId: "req-test-123",
         resumeDocumentId: "resume-doc-1",
         jobDescriptionDocumentId: "jd-doc-1",
-        questionCount: 5,
+        suggestionCount: 5,
         targetRole: "Backend Engineer",
         streamPayload: {
           resume_document_id: "resume-doc-1",
           job_description_document_id: "jd-doc-1",
-          question_count: 5,
+          suggestion_count: 5,
           target_role: "Backend Engineer",
         },
       }),
     );
 
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     fillRequiredInputs();
     openStep("03 调整参数");
-    fireEvent.change(screen.getByLabelText("题目数量"), {
+    fireEvent.change(screen.getByLabelText("建议条数"), {
       target: { value: "" },
     });
 
     openStep("04 提交生成");
-    fireEvent.click(screen.getByRole("button", { name: "生成面试包" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始分析简历" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     const requestBody = fetchMock.mock.calls[0]?.[1]?.body;
     expect(requestBody).toBeInstanceOf(FormData);
-    expect((requestBody as FormData).get("questionCount")).toBe("5");
+    expect((requestBody as FormData).get("suggestionCount")).toBe("5");
   });
 
   it("rejects responses that do not include the full prepared payload", async () => {
@@ -202,45 +223,66 @@ describe("InterviewPackForm", () => {
       }),
     );
 
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     fillRequiredInputs();
 
-    const submitButton = screen.getByRole("button", { name: "生成面试包" });
+    const submitButton = screen.getByRole("button", { name: "开始分析简历" });
     fireEvent.click(submitButton);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(submitButton).not.toBeDisabled());
     expect(pushMock).not.toHaveBeenCalled();
-    expect(window.sessionStorage.getItem(INTERVIEW_PACK_SESSION_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(RESUME_REVIEW_SESSION_STORAGE_KEY)).toBeNull();
   });
 
   it("writes the success payload to sessionStorage and navigates to the result page", async () => {
-    const payload = {
+    const createPayload = {
       requestId: "req-test-123",
       resumeDocumentId: "resume-doc-1",
       jobDescriptionDocumentId: "jd-doc-1",
-      questionCount: 5,
+      suggestionCount: 5,
       targetRole: "Backend Engineer",
       streamPayload: {
         resume_document_id: "resume-doc-1",
         job_description_document_id: "jd-doc-1",
-        question_count: 5,
+        suggestion_count: 5,
         target_role: "Backend Engineer",
       },
     };
 
-    fetchMock.mockResolvedValueOnce(jsonResponse(payload));
+    fetchMock.mockResolvedValueOnce(jsonResponse(createPayload));
 
-    render(<InterviewPackForm />);
+    render(<ResumeReviewForm />);
 
     fillRequiredInputs();
-    fireEvent.click(screen.getByRole("button", { name: "生成面试包" }));
+    fireEvent.click(screen.getByRole("button", { name: "开始分析简历" }));
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/results/req-test-123"));
 
     expect(
-      JSON.parse(window.sessionStorage.getItem(INTERVIEW_PACK_SESSION_STORAGE_KEY) ?? "null"),
-    ).toEqual(payload);
+      JSON.parse(window.sessionStorage.getItem(RESUME_REVIEW_SESSION_STORAGE_KEY) ?? "null"),
+    ).toEqual({
+      ...createPayload,
+      resumePreview: "Built hiring workflows and interview tooling.",
+      jobDescriptionPreview: "Backend role requires strong systems design.",
+    });
+  });
+
+  it("blocks submission when free quota is exhausted and no local provider settings exist", async () => {
+    resolveResumeReviewAccessGateMock.mockResolvedValueOnce({
+      remainingFreeAnalyses: 0,
+      requiresUserModelConfig: true,
+      hasLocalProviderSettings: false,
+    });
+
+    render(<ResumeReviewForm />);
+
+    fillRequiredInputs();
+    fireEvent.click(screen.getByRole("button", { name: "开始分析简历" }));
+
+    expect(await screen.findByText("免费额度已用完，请先配置本地模型设置。")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });

@@ -44,7 +44,7 @@ export function AppShell({
               <div className="flex flex-wrap gap-2">
                 <span className="meta-chip">可追踪请求上下文</span>
                 <span className="meta-chip">表单优先工作流</span>
-                <span className="meta-chip">面试包暂存区</span>
+                <span className="meta-chip">简历优化结果区</span>
               </div>
             </div>
 
@@ -60,7 +60,7 @@ export function AppShell({
                     任务
                   </p>
                   <p className="mt-2">
-                    收集结构化候选人上下文，与目标岗位对齐，再把请求送入面试生成链路。
+                    收集结构化候选人上下文，与目标岗位对齐，再把请求送入简历优化分析链路。
                   </p>
                 </div>
                 <div>

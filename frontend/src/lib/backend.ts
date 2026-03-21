@@ -1,7 +1,11 @@
 import { getBackendBaseUrl } from "@/lib/env";
 
-export function getInterviewStreamEndpoint(): string {
-  return `${getBackendBaseUrl()}/api/interview-packs/stream`;
+export function getResumeReviewSuggestionsStreamEndpoint(): string {
+  return `${getBackendBaseUrl()}/api/resume-reviews/suggestions/stream`;
+}
+
+export function getResumeReviewAnalysisStreamEndpoint(): string {
+  return `${getBackendBaseUrl()}/api/resume-reviews/analysis/stream`;
 }
 
 export function getDocumentTextIngestEndpoint(): string {

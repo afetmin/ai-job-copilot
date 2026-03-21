@@ -7,13 +7,13 @@ import {
   getDocumentTextIngestEndpoint,
 } from "@/lib/backend";
 
-const DEFAULT_QUESTION_COUNT = 5;
+const DEFAULT_SUGGESTION_COUNT = 5;
 
-type CreateInterviewPackErrorCode = "VALIDATION_ERROR" | "UPSTREAM_ERROR";
+type CreateResumeReviewErrorCode = "VALIDATION_ERROR" | "UPSTREAM_ERROR";
 
 function jsonError(
   status: number,
-  code: CreateInterviewPackErrorCode,
+  code: CreateResumeReviewErrorCode,
   message: string,
 ): NextResponse {
   return NextResponse.json({ error: { code, message } }, { status });
@@ -37,9 +37,9 @@ function getFile(formData: FormData, key: string): File | null {
   return value;
 }
 
-function parseQuestionCount(rawValue: string | null): number | null {
+function parseSuggestionCount(rawValue: string | null): number | null {
   if (rawValue === null || rawValue.trim() === "") {
-    return DEFAULT_QUESTION_COUNT;
+    return DEFAULT_SUGGESTION_COUNT;
   }
 
   const parsed = Number(rawValue);
@@ -195,12 +195,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return jobDescriptionValidationError;
   }
 
-  const questionCount = parseQuestionCount(getString(formData, "questionCount"));
-  if (questionCount === null) {
+  const suggestionCount = parseSuggestionCount(getString(formData, "suggestionCount"));
+  if (suggestionCount === null) {
     return jsonError(
       400,
       "VALIDATION_ERROR",
-      "questionCount must be an integer between 1 and 20",
+      "suggestionCount must be an integer between 1 and 20",
     );
   }
 
@@ -223,7 +223,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const streamPayload = {
     resume_document_id: resumeDocumentIdResult,
     job_description_document_id: jobDescriptionDocumentIdResult,
-    question_count: questionCount,
+    suggestion_count: suggestionCount,
     target_role: targetRole,
   };
 
@@ -231,7 +231,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     requestId,
     resumeDocumentId: resumeDocumentIdResult,
     jobDescriptionDocumentId: jobDescriptionDocumentIdResult,
-    questionCount,
+    suggestionCount,
     targetRole,
     streamPayload,
   });

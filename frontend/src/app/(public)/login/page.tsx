@@ -26,8 +26,8 @@ export default function LoginPage() {
       Icon: Radar,
     },
     {
-      title: "面试档案",
-      description: "把题目、来源锚点和后续追问串成可追溯的结果档案。",
+      title: "优化档案",
+      description: "把诊断结论、来源锚点和后续追问串成可追溯的结果档案。",
       Icon: Sparkles,
     },
   ];
@@ -69,7 +69,7 @@ export default function LoginPage() {
                 </span>
                 <span className="inline-flex items-center gap-2 border-2 border-foreground bg-card px-3 py-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] shadow-[4px_4px_0_#161616]">
                   <LockKeyhole className="h-3.5 w-3.5" strokeWidth={1.5} />
-                  面试控制室
+                  优化控制台
                 </span>
               </div>
 
@@ -81,7 +81,7 @@ export default function LoginPage() {
                   AI 求职助手
                 </h1>
                 <p className="max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-                  这是进入内部求职分析系统的门禁入口。下一步会进入分步工作台，完成候选人材料整理、岗位对齐与面试包生成。
+                  这是进入内部求职分析系统的门禁入口。下一步会进入分步工作台，完成候选人材料整理、岗位对齐与简历优化分析。
                 </p>
               </div>
 
@@ -125,7 +125,7 @@ export default function LoginPage() {
                       02 / 输入岗位描述与目标角色
                     </li>
                     <li className="border-2 border-foreground bg-card px-3 py-2 shadow-[3px_3px_0_#161616]">
-                      03 / 生成并进入结果档案页
+                      03 / 生成并进入结果页
                     </li>
                   </ul>
                 </div>

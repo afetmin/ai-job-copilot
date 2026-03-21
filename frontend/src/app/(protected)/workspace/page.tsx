@@ -1,5 +1,5 @@
-import { InterviewPackForm } from "@/components/workspace/interview-pack-form";
+import { ResumeReviewForm } from "@/components/workspace/resume-review-form";
 
 export default function WorkspacePage() {
-  return <InterviewPackForm />;
+  return <ResumeReviewForm />;
 }

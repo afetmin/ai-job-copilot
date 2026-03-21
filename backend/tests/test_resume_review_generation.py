@@ -3,13 +3,13 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from ai_job_copilot_backend.interview.service import (
-    InterviewPackGenerationService,
-    InterviewPackPromptBuilder,
+from ai_job_copilot_backend.resume_review.service import (
+    ResumeReviewGenerationService,
+    ResumeReviewPromptBuilder,
     MissingRetrievalContextError,
 )
 from ai_job_copilot_backend.providers.base import GenerationProvider
-from ai_job_copilot_backend.schemas.interview import InterviewPackRequest
+from ai_job_copilot_backend.schemas.resume_review import ResumeReviewRequest
 from ai_job_copilot_backend.schemas.retrieval import (
     RetrievalChunk,
     RetrievalContext,
@@ -90,11 +90,11 @@ class StubGenerationProvider(GenerationProvider[str, str]):
 
 
 def test_prompt_builder_includes_resume_and_job_context_chunks() -> None:
-    prompt_builder = InterviewPackPromptBuilder()
-    request = InterviewPackRequest(
+    prompt_builder = ResumeReviewPromptBuilder()
+    request = ResumeReviewRequest(
         resume_document_id="resume-001",
         job_description_document_id="jd-001",
-        question_count=1,
+        suggestion_count=1,
         target_role="Backend Engineer",
     )
 
@@ -111,7 +111,7 @@ def test_prompt_builder_includes_resume_and_job_context_chunks() -> None:
 
 
 @pytest.mark.anyio
-async def test_generation_service_returns_structured_interview_pack_with_sources() -> None:
+async def test_generation_service_returns_structured_resume_review_with_sources() -> None:
     retrieval_service = StubRetrievalService(
         resume_context=_build_resume_context(),
         job_context=_build_job_context(),
@@ -119,13 +119,13 @@ async def test_generation_service_returns_structured_interview_pack_with_sources
     generation_provider = StubGenerationProvider(
         json.dumps(
             {
-                "questions": [
+                "suggestions": [
                     {
-                        "question": "How did you design the retrieval architecture?",
-                        "follow_ups": ["How did you evaluate relevance quality?"],
-                        "reference_answer": (
-                            "I combined structured chunking with Chroma retrieval "
-                            "and FastAPI orchestration."
+                        "issue": "简历写了检索系统经历，但没有写清楚产出和影响。",
+                        "jd_alignment": "JD 明确要求候选人能证明检索系统设计与落地结果。",
+                        "rewrite_example": (
+                            "设计并落地基于 Chroma 的检索增强链路，结合 FastAPI 编排，"
+                            "将候选人问答场景的召回质量稳定在业务可用阈值以上。"
                         ),
                         "source_chunk_ids": ["resume-001:chunk:0", "jd-001:chunk:1"],
                     }
@@ -134,27 +134,26 @@ async def test_generation_service_returns_structured_interview_pack_with_sources
             ensure_ascii=False,
         )
     )
-    service = InterviewPackGenerationService(
+    service = ResumeReviewGenerationService(
         retrieval_service=retrieval_service,
         generation_provider=generation_provider,
     )
 
-    response = await service.generate_interview_pack(
-        InterviewPackRequest(
+    response = await service.generate_resume_review(
+        ResumeReviewRequest(
             resume_document_id="resume-001",
             job_description_document_id="jd-001",
-            question_count=1,
+            suggestion_count=1,
             target_role="Backend Engineer",
         )
     )
 
     assert response.request_id
-    assert len(response.questions) == 1
-    assert response.questions[0].question == "How did you design the retrieval architecture?"
-    assert response.questions[0].follow_ups == ["How did you evaluate relevance quality?"]
-    assert len(response.questions[0].sources) == 2
-    assert response.questions[0].sources[0].chunk_id == "resume-001:chunk:0"
-    assert response.questions[0].sources[1].document_id == "jd-001"
+    assert len(response.suggestions) == 1
+    assert response.suggestions[0].issue == "简历写了检索系统经历，但没有写清楚产出和影响。"
+    assert len(response.suggestions[0].sources) == 2
+    assert response.suggestions[0].sources[0].chunk_id == "resume-001:chunk:0"
+    assert response.suggestions[0].sources[1].document_id == "jd-001"
     assert generation_provider.prompts
 
 
@@ -164,18 +163,18 @@ async def test_generation_service_raises_clear_error_when_resume_context_is_miss
         resume_context=RetrievalContext(query="resume", chunks=[]),
         job_context=_build_job_context(),
     )
-    generation_provider = StubGenerationProvider('{"questions": []}')
-    service = InterviewPackGenerationService(
+    generation_provider = StubGenerationProvider('{"suggestions": []}')
+    service = ResumeReviewGenerationService(
         retrieval_service=retrieval_service,
         generation_provider=generation_provider,
     )
 
     with pytest.raises(MissingRetrievalContextError, match="resume"):
-        await service.generate_interview_pack(
-            InterviewPackRequest(
+        await service.generate_resume_review(
+            ResumeReviewRequest(
                 resume_document_id="resume-001",
                 job_description_document_id="jd-001",
-                question_count=1,
+                suggestion_count=1,
             )
         )
 
@@ -189,11 +188,11 @@ async def test_stream_generation_service_emits_progress_and_completed_events() -
     generation_provider = StubGenerationProvider(
         json.dumps(
             {
-                "questions": [
+                "suggestions": [
                     {
-                        "question": "How did you design the retrieval architecture?",
-                        "follow_ups": ["How did you evaluate relevance quality?"],
-                        "reference_answer": "I combined structured chunking with retrieval.",
+                        "issue": "简历中的检索经历缺少结果表达。",
+                        "jd_alignment": "JD 需要看到系统设计和交付结果。",
+                        "rewrite_example": "主导检索增强链路设计与交付，补充系统目标、评估方式和上线结果。",
                         "source_chunk_ids": ["resume-001:chunk:0", "jd-001:chunk:1"],
                     }
                 ]
@@ -201,18 +200,18 @@ async def test_stream_generation_service_emits_progress_and_completed_events() -
             ensure_ascii=False,
         )
     )
-    service = InterviewPackGenerationService(
+    service = ResumeReviewGenerationService(
         retrieval_service=retrieval_service,
         generation_provider=generation_provider,
     )
 
     events = [
         event
-        async for event in service.stream_interview_pack(
-            InterviewPackRequest(
+        async for event in service.stream_resume_review(
+            ResumeReviewRequest(
                 resume_document_id="resume-001",
                 job_description_document_id="jd-001",
-                question_count=1,
+                suggestion_count=1,
                 target_role="Backend Engineer",
             )
         )
@@ -228,5 +227,5 @@ async def test_stream_generation_service_emits_progress_and_completed_events() -
     assert events[1].resume_chunk_count == 1
     assert events[1].job_description_chunk_count == 1
     assert events[-1].data is not None
-    assert len(events[-1].data.questions) == 1
+    assert len(events[-1].data.suggestions) == 1
     assert generation_provider.stream_payloads

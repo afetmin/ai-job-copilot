@@ -17,13 +17,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function buildRequest(formData: FormData): Request {
-  return new Request("http://localhost/api/interview-packs/create", {
+  return new Request("http://localhost/api/resume-reviews/create", {
     method: "POST",
     body: formData,
   });
 }
 
-describe("POST /api/interview-packs/create", () => {
+describe("POST /api/resume-reviews/create", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -43,7 +43,7 @@ describe("POST /api/interview-packs/create", () => {
     "returns a validation error when %s input is missing",
     async (_label, partialInputs) => {
       const formData = new FormData();
-      formData.append("questionCount", "5");
+      formData.append("suggestionCount", "5");
       formData.append("targetRole", "Backend Engineer");
 
       if ("resumeText" in partialInputs) {
@@ -77,7 +77,7 @@ describe("POST /api/interview-packs/create", () => {
       "jobDescriptionFile",
       new File(["job description pdf"], "jd.pdf", { type: "application/pdf" }),
     );
-    formData.append("questionCount", "5");
+    formData.append("suggestionCount", "5");
     formData.append("targetRole", "Backend Engineer");
 
     const request = {
@@ -91,12 +91,12 @@ describe("POST /api/interview-packs/create", () => {
       requestId: expect.any(String),
       resumeDocumentId: "resume-doc-1",
       jobDescriptionDocumentId: "jd-doc-1",
-      questionCount: 5,
+      suggestionCount: 5,
       targetRole: "Backend Engineer",
       streamPayload: {
         resume_document_id: "resume-doc-1",
         job_description_document_id: "jd-doc-1",
-        question_count: 5,
+        suggestion_count: 5,
         target_role: "Backend Engineer",
       },
     });
@@ -139,7 +139,7 @@ describe("POST /api/interview-packs/create", () => {
     formData.append("resumeText", "Built hiring workflows and interview tooling.");
     formData.append("jobDescriptionText", "Backend role requires strong systems design.");
     formData.append("jobDescriptionFile", new File([], ""));
-    formData.append("questionCount", "5");
+    formData.append("suggestionCount", "5");
 
     const request = {
       formData: vi.fn().mockResolvedValue(formData),
@@ -199,7 +199,7 @@ describe("POST /api/interview-packs/create", () => {
     const formData = new FormData();
     formData.append("resumeText", "Built hiring workflows and interview tooling.");
     formData.append("jobDescriptionText", "Backend role requires strong systems design.");
-    formData.append("questionCount", "5");
+    formData.append("suggestionCount", "5");
 
     const response = await POST(buildRequest(formData));
 
@@ -221,7 +221,7 @@ describe("POST /api/interview-packs/create", () => {
     const formData = new FormData();
     formData.append("resumeText", "Built hiring workflows and interview tooling.");
     formData.append("jobDescriptionText", "Backend role requires strong systems design.");
-    formData.append("questionCount", "5");
+    formData.append("suggestionCount", "5");
 
     const response = await POST(buildRequest(formData));
 

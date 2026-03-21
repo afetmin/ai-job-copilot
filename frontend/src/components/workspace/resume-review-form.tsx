@@ -17,16 +17,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  resolveResumeReviewAccessGate,
+  shouldBlockResumeReviewCreation,
+} from "@/lib/resume-review-access";
 
 import { type GenerationStatus } from "./generation-status-card";
 
-export const INTERVIEW_PACK_SESSION_STORAGE_KEY =
-  "workspace:interview-pack:prepared-request";
+export const RESUME_REVIEW_SESSION_STORAGE_KEY =
+  "workspace:resume-review:prepared-request";
 
-const DEFAULT_QUESTION_COUNT = 5;
+const DEFAULT_SUGGESTION_COUNT = 5;
 const RESUME_REQUIRED_MESSAGE = "请填写简历内容或上传简历文件（PDF/TXT）。";
 const JOB_DESCRIPTION_REQUIRED_MESSAGE = "请填写岗位描述或上传岗位描述文件（PDF/TXT）。";
-const QUESTION_COUNT_REQUIRED_MESSAGE = "题目数量必须是 1 到 20 之间的整数。";
+const SUGGESTION_COUNT_REQUIRED_MESSAGE = "建议条数必须是 1 到 20 之间的整数。";
+const ACCESS_QUOTA_EXHAUSTED_MESSAGE = "免费额度已用完，请先配置本地模型设置。";
 const GENERIC_SUBMISSION_ERROR_MESSAGE = "提交失败，请稍后重试。";
 
 type StepId = "01" | "02" | "03" | "04";
@@ -34,25 +39,28 @@ type StepId = "01" | "02" | "03" | "04";
 type FormErrors = {
   resume?: string;
   jobDescription?: string;
-  questionCount?: string;
+  suggestionCount?: string;
   form?: string;
 };
 
-type InterviewPackCreateResponse = {
+type ResumeReviewCreateResponse = {
   requestId: string;
   resumeDocumentId: string;
   jobDescriptionDocumentId: string;
-  questionCount: number;
+  suggestionCount: number;
   targetRole: string | null;
   streamPayload: {
     resume_document_id: string;
     job_description_document_id: string;
-    question_count: number;
+    suggestion_count: number;
     target_role: string | null;
   };
 };
 
-type PreparedInterviewPackResponse = InterviewPackCreateResponse;
+type PreparedResumeReviewResponse = ResumeReviewCreateResponse & {
+  resumePreview: string;
+  jobDescriptionPreview: string;
+};
 
 type StepSectionProps = {
   activeStep: StepId;
@@ -91,9 +99,9 @@ function getFileField(formData: FormData, key: string): File | null {
   return value instanceof File ? value : null;
 }
 
-function parseQuestionCount(value: FormDataEntryValue | null): number | null {
+function parseSuggestionCount(value: FormDataEntryValue | null): number | null {
   if (typeof value !== "string" || value.trim() === "") {
-    return DEFAULT_QUESTION_COUNT;
+    return DEFAULT_SUGGESTION_COUNT;
   }
 
   const parsed = Number(value);
@@ -113,7 +121,7 @@ function buildValidationErrors(formData: FormData): FormErrors {
   const resumeFile = getFileField(formData, "resumeFile");
   const jobDescriptionText = getStringField(formData, "jobDescriptionText");
   const jobDescriptionFile = getFileField(formData, "jobDescriptionFile");
-  const questionCount = parseQuestionCount(formData.get("questionCount"));
+  const suggestionCount = parseSuggestionCount(formData.get("suggestionCount"));
 
   const nextErrors: FormErrors = {};
   if (!hasDocumentInput(resumeText, resumeFile)) {
@@ -122,16 +130,16 @@ function buildValidationErrors(formData: FormData): FormErrors {
   if (!hasDocumentInput(jobDescriptionText, jobDescriptionFile)) {
     nextErrors.jobDescription = JOB_DESCRIPTION_REQUIRED_MESSAGE;
   }
-  if (questionCount === null) {
-    nextErrors.questionCount = QUESTION_COUNT_REQUIRED_MESSAGE;
+  if (suggestionCount === null) {
+    nextErrors.suggestionCount = SUGGESTION_COUNT_REQUIRED_MESSAGE;
   }
 
   return nextErrors;
 }
 
-function isPreparedInterviewPackResponse(
+function isResumeReviewCreateResponse(
   value: unknown,
-): value is PreparedInterviewPackResponse {
+): value is ResumeReviewCreateResponse {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -146,10 +154,10 @@ function isPreparedInterviewPackResponse(
     payload.resumeDocumentId.trim() === "" ||
     typeof payload.jobDescriptionDocumentId !== "string" ||
     payload.jobDescriptionDocumentId.trim() === "" ||
-    typeof payload.questionCount !== "number" ||
-    !Number.isInteger(payload.questionCount) ||
-    payload.questionCount < 1 ||
-    payload.questionCount > 20 ||
+    typeof payload.suggestionCount !== "number" ||
+    !Number.isInteger(payload.suggestionCount) ||
+    payload.suggestionCount < 1 ||
+    payload.suggestionCount > 20 ||
     !(typeof payload.targetRole === "string" || payload.targetRole === null)
   ) {
     return false;
@@ -165,12 +173,33 @@ function isPreparedInterviewPackResponse(
     stream.resume_document_id.trim() !== "" &&
     typeof stream.job_description_document_id === "string" &&
     stream.job_description_document_id.trim() !== "" &&
-    typeof stream.question_count === "number" &&
-    Number.isInteger(stream.question_count) &&
-    stream.question_count >= 1 &&
-    stream.question_count <= 20 &&
+    typeof stream.suggestion_count === "number" &&
+    Number.isInteger(stream.suggestion_count) &&
+    stream.suggestion_count >= 1 &&
+    stream.suggestion_count <= 20 &&
     (typeof stream.target_role === "string" || stream.target_role === null)
   );
+}
+
+function buildTextPreview(value: string, fallback: string | null): string {
+  const trimmedValue = value.trim().replace(/\s+/g, " ");
+  if (trimmedValue.length > 0) {
+    return trimmedValue.length > 120 ? `${trimmedValue.slice(0, 117)}...` : trimmedValue;
+  }
+
+  return fallback ?? "";
+}
+
+function buildPreparedResumeReviewResponse(
+  payload: ResumeReviewCreateResponse,
+  resumePreview: string,
+  jobDescriptionPreview: string,
+): PreparedResumeReviewResponse {
+  return {
+    ...payload,
+    resumePreview,
+    jobDescriptionPreview,
+  };
 }
 
 function getStepIcon(step: StepId) {
@@ -415,26 +444,26 @@ function readParameterState(errors: FormErrors, targetRoleValue: string): {
   tone: StepTone;
   description: string;
 } {
-  if (errors.questionCount) {
-    return {
-      label: "需修正",
-      tone: "pending",
-      description: "题目数量需要修正后才能继续提交。",
-    };
+  if (errors.suggestionCount) {
+      return {
+        label: "需修正",
+        tone: "pending",
+        description: "建议条数需要修正后才能继续提交。",
+      };
   }
 
   if (targetRoleValue.trim()) {
-    return {
-      label: "已配置",
-      tone: "ready",
-      description: `目标岗位已设为 ${targetRoleValue.trim()}，题目数量保持可调。`,
-    };
+      return {
+        label: "已配置",
+        tone: "ready",
+        description: `目标岗位已设为 ${targetRoleValue.trim()}，建议条数保持可调。`,
+      };
   }
 
   return {
     label: "默认配置",
     tone: "ready",
-    description: "题目数量默认 5 题，目标岗位可选填。",
+    description: "建议条数默认 5 条，目标岗位可选填。",
   };
 }
 
@@ -445,7 +474,7 @@ function getFirstInvalidStep(errors: FormErrors): StepId | null {
   if (errors.jobDescription) {
     return "02";
   }
-  if (errors.questionCount) {
+  if (errors.suggestionCount) {
     return "03";
   }
   if (errors.form) {
@@ -454,7 +483,7 @@ function getFirstInvalidStep(errors: FormErrors): StepId | null {
   return null;
 }
 
-export function InterviewPackForm() {
+export function ResumeReviewForm() {
   const router = useRouter();
   const panelTopRef = useRef<HTMLDivElement | null>(null);
   const [activeStep, setActiveStep] = useState<StepId>("01");
@@ -538,12 +567,31 @@ export function InterviewPackForm() {
       return;
     }
 
-    const normalizedQuestionCount = parseQuestionCount(formData.get("questionCount"));
-    if (normalizedQuestionCount !== null) {
-      formData.set("questionCount", String(normalizedQuestionCount));
+    const normalizedSuggestionCount = parseSuggestionCount(formData.get("suggestionCount"));
+    if (normalizedSuggestionCount !== null) {
+      formData.set("suggestionCount", String(normalizedSuggestionCount));
     }
 
-    const requestPromise = fetch("/api/interview-packs/create", {
+    let accessGate: Awaited<ReturnType<typeof resolveResumeReviewAccessGate>>;
+    try {
+      accessGate = await resolveResumeReviewAccessGate();
+    } catch {
+      setErrors({ form: GENERIC_SUBMISSION_ERROR_MESSAGE });
+      setStatus("failed");
+      setActiveStep("04");
+      scrollToPanel();
+      return;
+    }
+
+    if (shouldBlockResumeReviewCreation(accessGate)) {
+      setErrors({ form: ACCESS_QUOTA_EXHAUSTED_MESSAGE });
+      setStatus("failed");
+      setActiveStep("04");
+      scrollToPanel();
+      return;
+    }
+
+    const requestPromise = fetch("/api/resume-reviews/create", {
       method: "POST",
       body: formData,
     });
@@ -580,7 +628,7 @@ export function InterviewPackForm() {
       return;
     }
 
-    if (!isPreparedInterviewPackResponse(payload)) {
+    if (!isResumeReviewCreateResponse(payload)) {
       setErrors({ form: GENERIC_SUBMISSION_ERROR_MESSAGE });
       setStatus("failed");
       setActiveStep("04");
@@ -588,9 +636,15 @@ export function InterviewPackForm() {
       return;
     }
 
+    const preparedPayload = buildPreparedResumeReviewResponse(
+      payload,
+      buildTextPreview(resumeTextValue, resumeFileName),
+      buildTextPreview(jobDescriptionTextValue, jobDescriptionFileName),
+    );
+
     window.sessionStorage.setItem(
-      INTERVIEW_PACK_SESSION_STORAGE_KEY,
-      JSON.stringify(payload),
+      RESUME_REVIEW_SESSION_STORAGE_KEY,
+      JSON.stringify(preparedPayload),
     );
     setStatus("ready_to_generate");
     router.push(`/results/${payload.requestId}`);
@@ -610,8 +664,8 @@ export function InterviewPackForm() {
   return (
     <AppShell
       eyebrow="受保护工作台"
-      title="面试包工作台"
-      subtitle="收集候选人材料、对齐岗位上下文、配置生成参数，并保持整条请求链路可追踪。"
+      title="简历优化工作台"
+      subtitle="收集候选人简历、对齐目标 JD、配置建议条数，并把整条优化分析链路保存为可追踪结果。"
     >
       <div className="space-y-5">
         <div className="sticky top-3 z-30">
@@ -736,7 +790,7 @@ export function InterviewPackForm() {
                             onChange={(event) => setJobDescriptionTextValue(event.target.value)}
                           />
                           <p className="text-sm leading-6 text-muted-foreground">
-                            这里适合粘贴 JD 正文、面试侧重点和团队预期。
+                            这里适合粘贴 JD 正文、核心要求和团队预期。
                           </p>
                         </div>
                       </div>
@@ -783,11 +837,11 @@ export function InterviewPackForm() {
 
                 <NarrativePanel
                   actionBody={[
-                    "把职责、硬性要求、面试侧重点和评估维度放在同一处，避免信息分散。",
-                    "这一步越完整，后续面试包越接近真实场景。",
+                    "把职责、硬性要求、优先级要求和评估维度放在同一处，避免信息分散。",
+                    "这一步越完整，后续简历优化建议越能对齐真实 JD。",
                   ]}
                   actionTitle="收敛岗位要求"
-                  nextBody={["切到第 03 步，确认目标岗位和题目数量，准备进入提交阶段。"]}
+                  nextBody={["切到第 03 步，确认目标岗位和建议条数，准备进入提交阶段。"]}
                   nextTitle="进入参数设置"
                   statusDescription={
                     hasJobDescriptionPreview
@@ -803,7 +857,7 @@ export function InterviewPackForm() {
 
             <StepSection
               activeStep={activeStep}
-              description="题目数量和目标岗位集中在这里配置，前两步的输入不需要重复确认。"
+              description="建议条数和目标岗位集中在这里配置，前两步的输入不需要重复确认。"
               label="生成参数"
               step="03"
               title="调整参数"
@@ -824,21 +878,21 @@ export function InterviewPackForm() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="questionCount">题目数量</Label>
+                        <Label htmlFor="suggestionCount">建议条数</Label>
                         <Input
-                          defaultValue={DEFAULT_QUESTION_COUNT}
-                          id="questionCount"
+                          defaultValue={DEFAULT_SUGGESTION_COUNT}
+                          id="suggestionCount"
                           max={20}
                           min={1}
-                          name="questionCount"
+                          name="suggestionCount"
                           type="number"
                         />
                       </div>
                     </div>
 
-                    {errors.questionCount ? (
+                    {errors.suggestionCount ? (
                       <p className="text-sm font-medium leading-6 text-destructive">
-                        {errors.questionCount}
+                        {errors.suggestionCount}
                       </p>
                     ) : null}
 
@@ -847,12 +901,12 @@ export function InterviewPackForm() {
                         {
                           icon: NotebookTabs,
                           title: "目标岗位",
-                          value: "可选填，用来让结果更接近真实面试语境。",
+                          value: "可选填，用来让结果更贴近目标 JD 的语境。",
                         },
                         {
                           icon: ListTodo,
-                          title: "题目数量",
-                          value: "默认 5 题，可在 1 到 20 之间调整。",
+                          title: "建议条数",
+                          value: "默认输出 5 条建议，可在 1 到 20 之间调整。",
                         },
                       ].map(({ icon: Icon, title, value }) => (
                         <div
@@ -877,11 +931,11 @@ export function InterviewPackForm() {
                 <NarrativePanel
                   actionBody={[
                     "参数只影响生成方式，不再重复要求你确认前两步材料。",
-                    "目标岗位适合在你想让题目贴近真实语境时填写；否则保持为空即可。",
+                    "目标岗位适合在你想让修改建议更贴近真实 JD 时填写；否则保持为空即可。",
                   ]}
-                  actionTitle="收紧生成口径"
-                  nextBody={["第 04 步会读取当前表单并直接发起创建请求，成功后跳转到结果档案页。"]}
-                  nextTitle="进入提交生成"
+                  actionTitle="收紧分析口径"
+                  nextBody={["第 04 步会读取当前表单并直接发起创建请求，成功后跳转到结果页。"]}
+                  nextTitle="进入提交分析"
                   statusDescription={parameterState.description}
                   statusLabel={parameterState.label}
                   statusTitle={parameterState.label}
@@ -892,10 +946,10 @@ export function InterviewPackForm() {
 
             <StepSection
               activeStep={activeStep}
-              description="这里不再展示所有输入，只负责解释提交行为、显示当前状态，并在条件满足后执行生成。"
+              description="这里不再展示所有输入，只负责解释提交行为、显示当前状态，并在条件满足后启动简历分析。"
               label="提交与状态"
               step="04"
-              title="提交生成"
+              title="提交分析"
             >
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_360px]">
                 <div className="rounded-[2px] border-2 border-foreground/80 bg-background p-5 shadow-[10px_10px_0_rgba(0,0,0,0.06)]">
@@ -906,10 +960,10 @@ export function InterviewPackForm() {
                       </div>
                       <div>
                         <p className="font-mono text-[0.76rem] uppercase tracking-[0.08em] text-muted-foreground">
-                          04 / 提交任务
+                          04 / 提交分析
                         </p>
                         <h2 className="mt-2 font-mono text-[1.3rem] font-normal uppercase tracking-[0.08em] text-foreground">
-                          提交任务
+                          提交分析
                         </h2>
                       </div>
                     </div>
@@ -918,8 +972,8 @@ export function InterviewPackForm() {
 
                   <p className="mt-4 text-sm leading-6 text-muted-foreground">
                     {isFormReady
-                      ? "主输入已补齐。这里会直接提交当前表单，并保持原有的创建、存储和跳转逻辑。"
-                      : "当前只能预览提交流程。补齐简历和岗位材料后，生成按钮才会启用。"}
+                      ? "主输入已补齐。这里会直接提交当前表单，并保持创建、存储和跳转逻辑。"
+                      : "当前只能预览提交流程。补齐简历和岗位材料后，分析按钮才会启用。"}
                   </p>
 
                   <div className="mt-5 grid gap-3">
@@ -943,13 +997,13 @@ export function InterviewPackForm() {
                           : "还没有岗位文本或 PDF，这一步完成后提交流程才会解锁。",
                       },
                       {
-                        title: "03 / 生成参数",
+                        title: "03 / 分析参数",
                         status: parameterState.label,
-                        summary: errors.questionCount
-                          ? errors.questionCount
+                        summary: errors.suggestionCount
+                          ? errors.suggestionCount
                           : targetRoleValue.trim()
-                            ? `目标岗位为 ${targetRoleValue.trim()}，题目数量沿用当前输入。`
-                            : `当前使用默认参数，题目数量默认为 ${DEFAULT_QUESTION_COUNT}。`,
+                            ? `目标岗位为 ${targetRoleValue.trim()}，建议条数沿用当前输入。`
+                            : `当前使用默认参数，建议条数默认为 ${DEFAULT_SUGGESTION_COUNT}。`,
                       },
                     ].map((item) => (
                       <div
@@ -972,7 +1026,7 @@ export function InterviewPackForm() {
                   <div className="mt-5 flex flex-col gap-3 sm:flex-row">
                     <Button disabled={!isFormReady || isUploading} size="lg" type="submit">
                       <span className="flex w-full items-center justify-between gap-3">
-                        <span>{isUploading ? "上传中..." : "生成面试包"}</span>
+                        <span>{isUploading ? "上传中..." : "开始分析简历"}</span>
                         <Send className="h-4 w-4" strokeWidth={1.5} />
                       </span>
                     </Button>
@@ -985,15 +1039,15 @@ export function InterviewPackForm() {
                 <NarrativePanel
                   actionBody={[
                     "当前页会把已有表单数据提交到创建接口，成功后把响应写入 `sessionStorage`。",
-                    "随后页面会跳转到结果档案页，继续读取准备好的请求数据。",
+                    "随后页面会跳转到结果页，继续读取准备好的分析请求数据。",
                   ]}
-                  actionTitle="解释提交流程"
+                  actionTitle="解释分析流程"
                   nextBody={[
                     isFormReady
-                      ? "确认无误后直接触发生成，请求成功后会进入结果页。"
-                      : "先回到前两步补齐主输入，再回来执行生成。",
+                      ? "确认无误后直接触发分析，请求成功后会进入结果页。"
+                      : "先回到前两步补齐主输入，再回来执行分析。",
                   ]}
-                  nextTitle={isFormReady ? "直接生成" : "返回补齐输入"}
+                  nextTitle={isFormReady ? "直接分析" : "返回补齐输入"}
                   statusDescription={submitState.description}
                   statusLabel={submitState.label}
                   statusTitle={submitState.label}

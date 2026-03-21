@@ -24,7 +24,7 @@ const STATUS_META: Record<GenerationStatus, StatusMeta> = {
   },
   validating: {
     label: "校验输入",
-    description: "正在检查简历、岗位描述和题目数量。",
+    description: "正在检查简历、岗位描述和建议条数。",
     nextStep: "校验通过后会开始发送创建请求。",
     Icon: LoaderCircle,
   },
@@ -36,7 +36,7 @@ const STATUS_META: Record<GenerationStatus, StatusMeta> = {
   },
   ready_to_generate: {
     label: "准备跳转",
-    description: "创建请求已返回，准备进入结果档案页。",
+    description: "创建请求已返回，准备进入简历优化结果页。",
     nextStep: "稍后会自动打开结果页面。",
     Icon: CheckCircle2,
   },
@@ -93,7 +93,7 @@ export function GenerationStatusCard({ status, message }: GenerationStatusCardPr
           { label: "下一步", value: meta.nextStep },
           {
             label: "链路",
-            value: "工作台只发一次创建请求，成功后写入 sessionStorage 并跳转到结果档案页。",
+            value: "工作台只发一次创建请求，成功后写入 sessionStorage 并跳转到结果页。",
           },
         ].map((item) => (
           <div key={item.label} className="rounded-[2px] border border-white/14 bg-white/6 px-4 py-3">
