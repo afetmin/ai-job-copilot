@@ -16,6 +16,13 @@ class ResumeReviewRequest(BaseModel):
     target_role: str | None = None
 
 
+class ResumeReviewChatMessageInput(BaseModel):
+    """统一聊天请求中的单条消息输入。"""
+
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+
 class RuntimeModelConfig(BaseModel):
     """请求级大模型配置覆盖。"""
 
@@ -78,6 +85,19 @@ class ResumeReviewAnalysisRequest(BaseModel):
     runtime_model_config: RuntimeModelConfig | None = None
 
 
+class ResumeReviewChatRequest(BaseModel):
+    """统一聊天流请求体。"""
+
+    review_id: str
+    request_id: str | None = None
+    resume_document_id: str
+    job_description_document_id: str
+    suggestion_count: int = Field(default=5, ge=1, le=20)
+    target_role: str | None = None
+    messages: list[ResumeReviewChatMessageInput] = Field(default_factory=list)
+    runtime_model_config: RuntimeModelConfig | None = None
+
+
 class ResumeReviewCitation(BaseModel):
     """初始分析消息引用的来源片段。"""
 
@@ -100,6 +120,40 @@ class ResumeReviewAnalysisMetadata(BaseModel):
     resume_chunk_count: int = Field(ge=0)
     job_description_chunk_count: int = Field(ge=0)
     focus_points: list[str] = Field(default_factory=list)
+
+
+class ResumeReviewChatContext(BaseModel):
+    """统一聊天流中的上下文摘要。"""
+
+    review_id: str
+    request_id: str
+    target_role: str | None = None
+    suggestion_count: int = Field(ge=1, le=20)
+    resume_chunk_count: int = Field(ge=0)
+    job_description_chunk_count: int = Field(ge=0)
+    focus_points: list[str] = Field(default_factory=list)
+
+
+ResumeReviewChatStreamStage = Literal[
+    "start",
+    "context",
+    "citation",
+    "delta",
+    "done",
+    "error",
+]
+
+
+class ResumeReviewChatStreamEvent(BaseModel):
+    """后端统一聊天 SSE 事件结构。"""
+
+    review_id: str
+    request_id: str
+    stage: ResumeReviewChatStreamStage
+    context: ResumeReviewChatContext | None = None
+    citation: ResumeReviewCitation | None = None
+    delta: str | None = None
+    message: str | None = None
 
 
 ResumeReviewAnalysisStreamStage = Literal[
