@@ -156,7 +156,7 @@ describe("ResultsWorkspace", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/resume-reviews/analysis",
+        "/api/resume-reviews/chat",
         expect.objectContaining({
           method: "POST",
         }),

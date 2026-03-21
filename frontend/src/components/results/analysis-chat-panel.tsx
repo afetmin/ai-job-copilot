@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { MessageSquareText, SendHorizontal } from "lucide-react";
 
 import type { ChatMessageRecord, ResumeReviewRecord } from "@/lib/resume-review-db";
@@ -14,6 +15,8 @@ type AnalysisChatPanelProps = {
   messages: ChatMessageRecord[];
   requestId: string;
   workspaceError: string | null;
+  isSending: boolean;
+  onSend: (message: string) => Promise<void>;
 };
 
 function formatStatus(status: ResumeReviewRecord["analysisStatus"] | undefined): string {
@@ -55,8 +58,21 @@ export function AnalysisChatPanel({
   messages,
   requestId,
   workspaceError,
+  isSending,
+  onSend,
 }: AnalysisChatPanelProps) {
+  const [draft, setDraft] = useState("");
   const metadataItems = infoItems(review, messages, requestId);
+
+  async function handleSend() {
+    const nextMessage = draft.trim();
+    if (nextMessage === "" || isSending) {
+      return;
+    }
+
+    setDraft("");
+    await onSend(nextMessage);
+  }
 
   return (
     <section className="flex min-h-[720px] flex-col overflow-hidden border-2 border-foreground bg-card shadow-[6px_6px_0_#161616]">
@@ -121,12 +137,20 @@ export function AnalysisChatPanel({
             <Textarea
               className="min-h-[84px] resize-none shadow-none"
               id="results-chat-input"
-              placeholder="继续追问这份简历哪里需要修改，下一步会接入发送逻辑。"
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="继续追问这份简历哪里需要修改。"
+              value={draft}
             />
-            <Button disabled size="lg" type="button" variant="secondary">
+            <Button
+              disabled={isSending || draft.trim() === ""}
+              onClick={() => void handleSend()}
+              size="lg"
+              type="button"
+              variant="secondary"
+            >
               <span className="flex items-center gap-2">
                 <SendHorizontal className="h-4 w-4" strokeWidth={1.5} />
-                发送
+                {isSending ? "发送中" : "发送"}
               </span>
             </Button>
           </div>

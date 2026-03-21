@@ -28,9 +28,9 @@ type ResultsWorkspaceProps = {
   requestId: string;
 };
 
-type InitialAnalysisSseEnvelope = {
+type ResumeReviewChatSseEnvelope = {
   stage?: string;
-  metadata?: {
+  context?: {
     suggestion_count?: number;
     resume_chunk_count?: number;
     job_description_chunk_count?: number;
@@ -47,6 +47,8 @@ type InitialAnalysisSseEnvelope = {
   message?: string;
 };
 
+const INITIAL_REVIEW_PROMPT = "请先给我这份简历针对目标岗位的整体分析和修改建议。";
+
 function replaceMessage(messages: ChatMessageRecord[], nextMessage: ChatMessageRecord) {
   const targetIndex = messages.findIndex((message) => message.messageId === nextMessage.messageId);
   if (targetIndex === -1) {
@@ -56,7 +58,7 @@ function replaceMessage(messages: ChatMessageRecord[], nextMessage: ChatMessageR
   return messages.map((message, index) => (index === targetIndex ? nextMessage : message));
 }
 
-function parseCitation(event: InitialAnalysisSseEnvelope["citation"]): ResumeReviewCitation | null {
+function parseCitation(event: ResumeReviewChatSseEnvelope["citation"]): ResumeReviewCitation | null {
   if (
     event === undefined ||
     typeof event.citation_id !== "string" ||
@@ -78,7 +80,7 @@ function parseCitation(event: InitialAnalysisSseEnvelope["citation"]): ResumeRev
 
 async function consumeSseStream(
   response: Response,
-  onEvent: (eventName: string, payload: InitialAnalysisSseEnvelope) => Promise<void> | void,
+  onEvent: (eventName: string, payload: ResumeReviewChatSseEnvelope) => Promise<void> | void,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -110,7 +112,7 @@ async function consumeSseStream(
         }
 
         const data = dataLines.join("\n");
-        const payload = data ? (JSON.parse(data) as InitialAnalysisSseEnvelope) : {};
+        const payload = data ? (JSON.parse(data) as ResumeReviewChatSseEnvelope) : {};
         await onEvent(eventName, payload);
       }
 
@@ -123,6 +125,15 @@ async function consumeSseStream(
   }
 }
 
+function buildChatRequestMessages(messages: ChatMessageRecord[]) {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+}
+
 export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
   const [packs, setPacks] = useState<ResumeReviewRecord[]>([]);
   const [activePackId, setActivePackId] = useState<string | null>(null);
@@ -131,6 +142,7 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
   const [providerSettings, setProviderSettings] = useState<ProviderSettingsRecord | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isModelSettingsOpen, setIsModelSettingsOpen] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const packsRef = useRef<ResumeReviewRecord[]>([]);
   const inFlightPackIdRef = useRef<string | null>(null);
 
@@ -270,172 +282,202 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
     ? packs.find((pack) => pack.reviewId === activePackId) ?? null
     : null;
 
+  async function startChatTurn(
+    pack: ResumeReviewRecord,
+    currentMessages: ChatMessageRecord[],
+    userMessageContent: string,
+    assistantKind: ChatMessageRecord["kind"],
+  ) {
+    if (inFlightPackIdRef.current === pack.reviewId) {
+      return;
+    }
+
+    inFlightPackIdRef.current = pack.reviewId;
+    setIsSending(true);
+    setWorkspaceError(null);
+
+    let requestMessages = currentMessages;
+    const trimmedUserMessage = userMessageContent.trim();
+    if (trimmedUserMessage !== "") {
+      const userMessage = await upsertChatMessage({
+        messageId: `user:${pack.reviewId}:${Date.now()}`,
+        reviewId: pack.reviewId,
+        role: "user",
+        kind: "follow_up",
+        content: trimmedUserMessage,
+        status: "done",
+        citations: [],
+      });
+      requestMessages = [...currentMessages, userMessage];
+      setMessages((existingMessages) => replaceMessage(existingMessages, userMessage));
+    }
+
+    let assistantMessage = await upsertChatMessage({
+      messageId: `assistant:${pack.reviewId}:${Date.now()}`,
+      reviewId: pack.reviewId,
+      role: "assistant",
+      kind: assistantKind,
+      content: "",
+      status: "streaming",
+      citations: [],
+    });
+    setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+
+    await upsertResumeReview({
+      ...pack,
+      analysisStatus: "streaming",
+      updatedAt: Date.now(),
+      lastOpenedAt: Date.now(),
+    });
+    setPacks(await listResumeReviews());
+
+    const response = await fetch("/api/resume-reviews/chat", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        reviewId: pack.reviewId,
+        requestId: pack.requestId,
+        resumeDocumentId: pack.resumeDocumentId,
+        jobDescriptionDocumentId: pack.jobDescriptionDocumentId,
+        suggestionCount: pack.suggestionCount,
+        targetRole: pack.targetRole,
+        messages: buildChatRequestMessages(requestMessages),
+        localModelSettings:
+          providerSettings === null
+            ? null
+            : {
+                provider: providerSettings.provider,
+                apiKey: providerSettings.apiKey,
+                model: providerSettings.model,
+                baseUrl: providerSettings.baseUrl,
+              },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorMessage =
+        response.status === 403
+          ? "免费额度已用完，请先配置本地模型设置。"
+          : assistantKind === "initial_analysis"
+            ? "初始分析生成失败，请稍后重试。"
+            : "追问发送失败，请稍后重试。";
+      assistantMessage = await upsertChatMessage({
+        ...assistantMessage,
+        status: "error",
+        content: errorMessage,
+        updatedAt: Date.now(),
+      });
+      await upsertResumeReview({
+        ...pack,
+        analysisStatus: "error",
+        updatedAt: Date.now(),
+      });
+      setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+      setPacks(await listResumeReviews());
+      setWorkspaceError(errorMessage);
+      inFlightPackIdRef.current = null;
+      setIsSending(false);
+      return;
+    }
+
+    await consumeSseStream(response, async (eventName, payload) => {
+      if (eventName === "citation") {
+        const citation = parseCitation(payload.citation);
+        if (citation === null) {
+          return;
+        }
+
+        assistantMessage = await upsertChatMessage({
+          ...assistantMessage,
+          citations: [...assistantMessage.citations, citation],
+          updatedAt: Date.now(),
+        });
+        setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+        return;
+      }
+
+      if (eventName === "delta" && typeof payload.delta === "string") {
+        assistantMessage = await upsertChatMessage({
+          ...assistantMessage,
+          content: `${assistantMessage.content}${payload.delta}`,
+          updatedAt: Date.now(),
+        });
+        setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+        return;
+      }
+
+      if (eventName === "error") {
+        assistantMessage = await upsertChatMessage({
+          ...assistantMessage,
+          status: "error",
+          content:
+            assistantMessage.content ||
+            payload.message ||
+            (assistantKind === "initial_analysis"
+              ? "初始分析生成失败，请稍后重试。"
+              : "追问发送失败，请稍后重试。"),
+          updatedAt: Date.now(),
+        });
+        await upsertResumeReview({
+          ...pack,
+          analysisStatus: "error",
+          updatedAt: Date.now(),
+        });
+        setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+        setPacks(await listResumeReviews());
+        setWorkspaceError(payload.message ?? "生成失败，请稍后重试。");
+        return;
+      }
+
+      if (eventName === "done") {
+        assistantMessage = await upsertChatMessage({
+          ...assistantMessage,
+          status: "done",
+          updatedAt: Date.now(),
+        });
+        await upsertResumeReview({
+          ...pack,
+          analysisStatus: "completed",
+          updatedAt: Date.now(),
+        });
+        setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+        setPacks(await listResumeReviews());
+      }
+    });
+
+    inFlightPackIdRef.current = null;
+    setIsSending(false);
+  }
+
   useEffect(() => {
     if (activePack === null || hydratedPackId !== activePack.reviewId) {
       return;
     }
 
-    const hasInitialAnalysisMessage = messages.some(
-      (message) =>
-        message.reviewId === activePack.reviewId &&
-        message.role === "assistant" &&
-        message.kind === "initial_analysis",
-    );
-
-    if (hasInitialAnalysisMessage || inFlightPackIdRef.current === activePack.reviewId) {
+    if (messages.length > 0 || inFlightPackIdRef.current === activePack.reviewId) {
       return;
     }
 
-    let cancelled = false;
-
-    async function startInitialAnalysisStream() {
-      inFlightPackIdRef.current = activePack.reviewId;
-      setWorkspaceError(null);
-
-      let analysisMessage = await upsertChatMessage({
-        messageId: `initial-analysis:${activePack.reviewId}`,
-        reviewId: activePack.reviewId,
-        role: "assistant",
-        kind: "initial_analysis",
-        content: "",
-        status: "streaming",
-        citations: [],
-      });
-
-      if (!cancelled) {
-        setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-      }
-
-      await upsertResumeReview({
-        ...activePack,
-        analysisStatus: "streaming",
-        updatedAt: Date.now(),
-        lastOpenedAt: Date.now(),
-      });
-      if (!cancelled) {
-        setPacks(await listResumeReviews());
-      }
-
-      const response = await fetch("/api/resume-reviews/analysis", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          reviewId: activePack.reviewId,
-          requestId: activePack.requestId,
-          resumeDocumentId: activePack.resumeDocumentId,
-          jobDescriptionDocumentId: activePack.jobDescriptionDocumentId,
-          suggestionCount: activePack.suggestionCount,
-          targetRole: activePack.targetRole,
-          localModelSettings:
-            providerSettings === null
-              ? null
-              : {
-                  provider: providerSettings.provider,
-                  apiKey: providerSettings.apiKey,
-                  model: providerSettings.model,
-                  baseUrl: providerSettings.baseUrl,
-                },
-        }),
-      });
-
-      if (!response.ok) {
-        analysisMessage = await upsertChatMessage({
-          ...analysisMessage,
-          status: "error",
-          content: "初始分析生成失败，请稍后重试。",
-          updatedAt: Date.now(),
-        });
-        await upsertResumeReview({
-          ...activePack,
-          analysisStatus: "error",
-          updatedAt: Date.now(),
-        });
-        if (!cancelled) {
-          setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-          setPacks(await listResumeReviews());
-          setWorkspaceError("初始分析生成失败，请稍后重试。");
-        }
-        inFlightPackIdRef.current = null;
-        return;
-      }
-
-      await consumeSseStream(response, async (eventName, payload) => {
-        if (cancelled) {
-          return;
-        }
-
-        if (eventName === "citation") {
-          const citation = parseCitation(payload.citation);
-          if (citation === null) {
-            return;
-          }
-
-          analysisMessage = await upsertChatMessage({
-            ...analysisMessage,
-            citations: [...analysisMessage.citations, citation],
-            updatedAt: Date.now(),
-          });
-          setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-          return;
-        }
-
-        if (eventName === "delta" && typeof payload.delta === "string") {
-          analysisMessage = await upsertChatMessage({
-            ...analysisMessage,
-            content: `${analysisMessage.content}${payload.delta}`,
-            updatedAt: Date.now(),
-          });
-          setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-          return;
-        }
-
-        if (eventName === "error") {
-          analysisMessage = await upsertChatMessage({
-            ...analysisMessage,
-            status: "error",
-            content:
-              analysisMessage.content || payload.message || "初始分析生成失败，请稍后重试。",
-            updatedAt: Date.now(),
-          });
-          await upsertResumeReview({
-            ...activePack,
-            analysisStatus: "error",
-            updatedAt: Date.now(),
-          });
-          setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-          setPacks(await listResumeReviews());
-          setWorkspaceError(payload.message ?? "初始分析生成失败，请稍后重试。");
-          return;
-        }
-
-        if (eventName === "done") {
-          analysisMessage = await upsertChatMessage({
-            ...analysisMessage,
-            status: "done",
-            updatedAt: Date.now(),
-          });
-          await upsertResumeReview({
-            ...activePack,
-            analysisStatus: "completed",
-            updatedAt: Date.now(),
-          });
-          setMessages((currentMessages) => replaceMessage(currentMessages, analysisMessage));
-          setPacks(await listResumeReviews());
-        }
-      });
-
-      inFlightPackIdRef.current = null;
+    async function startInitialChat() {
+      await startChatTurn(activePack, [], INITIAL_REVIEW_PROMPT, "initial_analysis");
     }
 
-    void startInitialAnalysisStream();
+    void startInitialChat();
 
     return () => {
-      cancelled = true;
       inFlightPackIdRef.current = null;
     };
   }, [activePack, hydratedPackId, messages, providerSettings]);
+
+  async function handleSendMessage(message: string) {
+    if (activePack === null) {
+      return;
+    }
+
+    await startChatTurn(activePack, messages, message, "follow_up");
+  }
 
   async function handleSaveProviderSettings(input: ProviderSettingsInput) {
     await saveProviderSettings(input);
@@ -506,7 +548,9 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
 
           <div className="space-y-6">
             <AnalysisChatPanel
+              isSending={isSending}
               messages={messages}
+              onSend={handleSendMessage}
               review={activePack}
               requestId={activePack?.requestId ?? requestId}
               workspaceError={workspaceError}
