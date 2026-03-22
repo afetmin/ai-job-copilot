@@ -4,7 +4,7 @@
 
 ## 操作演示
 
-![](frontend/demo/demo.gif)
+![操作演示](https://raw.githubusercontent.com/afetmin/ai-job-copilot/main/frontend/demo/demo.mp4)
 - 示例素材：
   - `frontend/demo/resume.pdf`
   - `frontend/demo/jd.txt`
