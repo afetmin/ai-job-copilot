@@ -4,7 +4,7 @@
 
 ## 操作演示
 
-- 演示视频（点击观看）：[frontend/demo/iShot_2026-03-22_11.25.30.mp4](frontend/demo/iShot_2026-03-22_11.25.30.mp4)
+- 演示视频（点击观看）：[frontend/demo/demo.mp4](frontend/demo/demo.mp4)
 - 说明：GitHub README 对仓库内 `mp4` 内嵌播放支持有限，如未显示播放器，请直接点击上面链接。
 - 示例素材：
   - `frontend/demo/resume.pdf`
@@ -16,7 +16,6 @@
 .
 ├── frontend/   # Next.js 前端（工作台、结果页、API 代理路由）
 ├── backend/    # FastAPI 后端（文档处理、向量检索、模型调用）
-├── docs/       # 设计与文档
 └── dev.sh      # 一键本地联调脚本（同时启动前后端）
 ```
 
