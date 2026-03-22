@@ -4,8 +4,7 @@
 
 ## 操作演示
 
-- 演示视频（点击观看）：[frontend/demo/demo.mp4](frontend/demo/demo.mp4)
-- 说明：GitHub README 对仓库内 `mp4` 内嵌播放支持有限，如未显示播放器，请直接点击上面链接。
+![](frontend/demo/demo.gif)
 - 示例素材：
   - `frontend/demo/resume.pdf`
   - `frontend/demo/jd.txt`
