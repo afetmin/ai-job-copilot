@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dbMocks = vi.hoisted(() => ({
+  deleteChatMessageMock: vi.fn(),
   deleteResumeReviewMock: vi.fn(),
   getProviderSettingsMock: vi.fn(),
   listResumeReviewsMock: vi.fn(),
@@ -12,6 +13,7 @@ const dbMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/resume-review-db", () => ({
+  deleteChatMessage: dbMocks.deleteChatMessageMock,
   deleteResumeReview: dbMocks.deleteResumeReviewMock,
   getProviderSettings: dbMocks.getProviderSettingsMock,
   listResumeReviews: dbMocks.listResumeReviewsMock,
@@ -101,6 +103,7 @@ describe("ResultsWorkspace", () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+    dbMocks.deleteChatMessageMock.mockReset();
     dbMocks.deleteResumeReviewMock.mockReset();
     dbMocks.getProviderSettingsMock.mockReset();
     dbMocks.listResumeReviewsMock.mockReset();
@@ -131,6 +134,7 @@ describe("ResultsWorkspace", () => {
 
     vi.stubGlobal("fetch", fetchMock);
     dbMocks.deleteResumeReviewMock.mockResolvedValue(undefined);
+    dbMocks.deleteChatMessageMock.mockResolvedValue(undefined);
     dbMocks.getProviderSettingsMock.mockResolvedValue(null);
     dbMocks.listResumeReviewsMock.mockResolvedValue([packRecord]);
     dbMocks.listMessagesForReviewMock.mockResolvedValue([]);
@@ -149,7 +153,7 @@ describe("ResultsWorkspace", () => {
         [
           'event: start\ndata: {"review_id":"req-test-123","request_id":"req-test-123"}',
           'event: metadata\ndata: {"metadata":{"suggestion_count":5,"resume_chunk_count":2,"job_description_chunk_count":1,"focus_points":["系统设计","项目复盘"]}}',
-          'event: citation\ndata: {"citation":{"citation_id":"resume:0","source_type":"resume","title":"resume.pdf","excerpt":"Built retrieval pipelines.","score":0.91}}',
+          'event: citation\ndata: {"citation":{"citation_id":"resume:0","source_type":"resume","title":"resume.pdf","excerpt":"Built retrieval pipelines.","relevance_level":"high","score":0.18}}',
           'event: delta\ndata: {"delta":"# 初始分析\\n\\n## 主要问题诊断\\n\\n- 简历与 JD 基本匹配，但结果表达还可以更具体"}',
           'event: done\ndata: {"review_id":"req-test-123"}',
           "",
@@ -188,43 +192,67 @@ describe("ResultsWorkspace", () => {
       ),
     );
 
+    expect(screen.getByText("简历分析工作台")).toBeInTheDocument();
     expect((await screen.findAllByText("对话列表")).length).toBeGreaterThan(0);
     expect(screen.queryByText("已保存档案")).not.toBeInTheDocument();
     expect(screen.queryByText("当前跳转载荷")).not.toBeInTheDocument();
     expect(screen.getByText("消息数")).toBeInTheDocument();
     expect(screen.getByText("引用数")).toBeInTheDocument();
     expect(screen.getByText("输入修改追问")).toBeInTheDocument();
+    expect(screen.getByText("对话列表").closest("section")?.className).toContain(
+      "overflow-hidden",
+    );
+    expect(screen.getByText("对话列表").closest("section")?.className).toContain("flex");
+    expect(screen.getByLabelText("对话列表滚动区域").className).toContain("overflow-y-auto");
+    expect(screen.getByLabelText("对话列表滚动区域").className).toContain("paper-scrollbar");
+    expect(screen.getByText("对话列表").closest("aside")?.className).toContain(
+      "xl:h-[calc(100dvh-9.1rem)]",
+    );
+    expect(screen.getByLabelText("分析消息流").className).toContain("paper-scrollbar");
+    expect(screen.getByLabelText("分析消息流").className).toContain("overflow-y-auto");
     expect(screen.getByRole("button", { name: /发送/i })).toBeDisabled();
     expect(await screen.findByRole("heading", { name: "初始分析" })).toBeInTheDocument();
     expect(screen.getByText("引用依据 (1)")).toBeInTheDocument();
-    expect(screen.getByText("resume.pdf")).toBeInTheDocument();
-    expect(screen.getByText("Built retrieval pipelines.")).toBeInTheDocument();
+    expect(screen.getByLabelText("简历 引用：resume.pdf")).toBeInTheDocument();
+    expect(screen.getByText("悬停查看详情")).toBeInTheDocument();
   });
 
-  it("opens model settings in a dialog instead of rendering them inline", async () => {
-    dbMocks.listMessagesForReviewMock.mockResolvedValue([
-      {
-        messageId: "initial_analysis:req-test-123",
-        reviewId: "req-test-123",
-        role: "assistant",
-        kind: "initial_analysis",
-        content: "Saved initial_analysis content",
-        status: "done",
-        citations: [],
-        createdAt: 10,
-        updatedAt: 10,
-      },
-    ]);
+  it("reveals citations only after the assistant message is done streaming", async () => {
+    const controlledStream = createControlledSseResponse();
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(controlledStream.response);
 
     render(<ResultsWorkspace requestId="req-test-123" />);
 
-    expect(screen.queryByRole("heading", { name: "本机 BYOK" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/resume-reviews/chat",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      ),
+    );
 
-    fireEvent.click(await screen.findByRole("button", { name: "模型配置" }));
+    controlledStream.push(
+      'event: start\ndata: {"review_id":"req-test-123","request_id":"req-test-123"}\n\n'
+        + 'event: metadata\ndata: {"metadata":{"suggestion_count":5,"resume_chunk_count":2,"job_description_chunk_count":1,"focus_points":["系统设计","项目复盘"]}}\n\n'
+        + 'event: citation\ndata: {"citation":{"citation_id":"resume:0","source_type":"resume","title":"resume.pdf","excerpt":"Built retrieval pipelines.","relevance_level":"high","score":0.18}}\n\n'
+        + 'event: delta\ndata: {"delta":"# 初始分析\\n\\n流式回答中"}\n\n',
+    );
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本机模型设置" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "本机 BYOK" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "初始分析" })).toBeInTheDocument();
+    expect(screen.queryByText("引用依据 (1)")).not.toBeInTheDocument();
+    expect(screen.queryByText("resume.pdf")).not.toBeInTheDocument();
+    expect(screen.queryByText("Built retrieval pipelines.")).not.toBeInTheDocument();
+
+    controlledStream.push('event: done\ndata: {"review_id":"req-test-123"}\n\n');
+    controlledStream.close();
+
+    await waitFor(() => {
+      expect(screen.getByText("引用依据 (1)")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("简历 引用：resume.pdf")).toBeInTheDocument();
   });
 
   it("renders the full message stream in one dialog and switches by pack", async () => {
@@ -394,6 +422,170 @@ describe("ResultsWorkspace", () => {
     await waitFor(() => {
       expect(screen.queryByText("旧对话不应该串到新对话")).not.toBeInTheDocument();
     });
+  });
+
+  it("retries interrupted initial analysis without persisting the synthetic prompt as a user message", async () => {
+    const messagesByReviewId: Record<string, Array<Record<string, unknown>>> = {
+      "req-test-123": [],
+      "pack-2": [
+        {
+          messageId: "initial_analysis:pack-2",
+          reviewId: "pack-2",
+          role: "assistant",
+          kind: "initial_analysis",
+          content: "第二个对话保持可读",
+          status: "done",
+          citations: [],
+          createdAt: 12,
+          updatedAt: 12,
+        },
+      ],
+    };
+
+    dbMocks.listResumeReviewsMock.mockResolvedValue([packRecord, secondPackRecord]);
+    dbMocks.listMessagesForReviewMock.mockImplementation(async (reviewId: string) => {
+      return [...(messagesByReviewId[reviewId] ?? [])];
+    });
+    dbMocks.upsertChatMessageMock.mockImplementation(async (input: Record<string, unknown>) => {
+      const record = {
+        citations: [],
+        createdAt: 10,
+        updatedAt: 10,
+        ...input,
+      };
+      const reviewId = record.reviewId as string;
+      const nextMessages = [...(messagesByReviewId[reviewId] ?? [])];
+      const targetIndex = nextMessages.findIndex(
+        (message) => message.messageId === record.messageId,
+      );
+      if (targetIndex === -1) {
+        nextMessages.push(record);
+      } else {
+        nextMessages[targetIndex] = record;
+      }
+      messagesByReviewId[reviewId] = nextMessages;
+      return record;
+    });
+    dbMocks.deleteChatMessageMock.mockImplementation(async (messageId: string) => {
+      messagesByReviewId["req-test-123"] = (messagesByReviewId["req-test-123"] ?? []).filter(
+        (message) => message.messageId !== messageId,
+      );
+    });
+
+    fetchMock.mockReset();
+    const retriedInitialStream = createControlledSseResponse();
+    fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+    fetchMock.mockResolvedValueOnce(retriedInitialStream.response);
+    render(<ResultsWorkspace requestId="req-test-123" />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /ai product engineer/i }));
+    expect(await screen.findByText("第二个对话保持可读")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /backend engineer/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("正在基于简历与 JD 生成分析...")).toBeInTheDocument();
+    expect(
+      screen.queryByText("请先给我这份简历针对目标岗位的整体分析和修改建议。"),
+    ).not.toBeInTheDocument();
+    expect(dbMocks.deleteChatMessageMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      retriedInitialStream.close();
+    });
+  });
+
+  it("marks an interrupted follow-up as error instead of leaving it streaming forever", async () => {
+    const messagesByReviewId: Record<string, Array<Record<string, unknown>>> = {
+      "req-test-123": [
+        {
+          messageId: "initial_analysis:req-test-123",
+          reviewId: "req-test-123",
+          role: "assistant",
+          kind: "initial_analysis",
+          content: "初始分析已完成",
+          status: "done",
+          citations: [],
+          createdAt: 10,
+          updatedAt: 10,
+        },
+      ],
+      "pack-2": [
+        {
+          messageId: "initial_analysis:pack-2",
+          reviewId: "pack-2",
+          role: "assistant",
+          kind: "initial_analysis",
+          content: "第二个对话保持原样",
+          status: "done",
+          citations: [],
+          createdAt: 12,
+          updatedAt: 12,
+        },
+      ],
+    };
+
+    dbMocks.listResumeReviewsMock.mockResolvedValue([packRecord, secondPackRecord]);
+    dbMocks.listMessagesForReviewMock.mockImplementation(async (reviewId: string) => {
+      return [...(messagesByReviewId[reviewId] ?? [])];
+    });
+    dbMocks.upsertChatMessageMock.mockImplementation(async (input: Record<string, unknown>) => {
+      const record = {
+        citations: [],
+        createdAt: 10,
+        updatedAt: 10,
+        ...input,
+      };
+      const reviewId = record.reviewId as string;
+      const nextMessages = [...(messagesByReviewId[reviewId] ?? [])];
+      const targetIndex = nextMessages.findIndex(
+        (message) => message.messageId === record.messageId,
+      );
+      if (targetIndex === -1) {
+        nextMessages.push(record);
+      } else {
+        nextMessages[targetIndex] = record;
+      }
+      messagesByReviewId[reviewId] = nextMessages;
+      return record;
+    });
+
+    fetchMock.mockReset();
+    fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+
+    render(<ResultsWorkspace requestId="req-test-123" />);
+
+    expect(await screen.findByText("初始分析已完成")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("输入修改追问"), {
+      target: { value: "还有什么信息吗" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: /ai product engineer/i }));
+    expect(await screen.findByText("第二个对话保持原样")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /backend engineer/i }));
+
+    expect(await screen.findByText("本次追问已中断，请重新发送。")).toBeInTheDocument();
+    expect(screen.getByText("还有什么信息吗")).toBeInTheDocument();
+    expect(screen.queryByText("正在基于简历与 JD 生成分析...")).not.toBeInTheDocument();
   });
 
   it("recovers the composer after a transport-level stream failure", async () => {

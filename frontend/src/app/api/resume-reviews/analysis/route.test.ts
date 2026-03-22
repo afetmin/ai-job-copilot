@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createResumeReviewAccessCookie,
   RESUME_REVIEW_ACCESS_COOKIE_NAME,
-  parseResumeReviewAccessCookie,
 } from "@/lib/resume-review-access";
+import {
+  createResumeReviewAccessCookie,
+  parseResumeReviewAccessCookie,
+} from "@/lib/resume-review-access-cookie";
 
 import { POST } from "./route";
 
@@ -90,10 +92,10 @@ describe("POST /api/resume-reviews/analysis", () => {
           suggestionCount: 5,
           targetRole: "Backend Engineer",
           localModelSettings: {
-            provider: "dashscope",
+            protocol: "anthropic_compatible",
             apiKey: "user-key",
-            model: "qwen-max",
-            baseUrl: "https://runtime.example/v1",
+            model: "claude-sonnet-4-5",
+            baseUrl: "https://runtime.example",
           },
         }),
       }),
@@ -109,11 +111,37 @@ describe("POST /api/resume-reviews/analysis", () => {
       suggestion_count: 5,
       target_role: "Backend Engineer",
       runtime_model_config: {
-        provider: "dashscope",
+        protocol: "anthropic_compatible",
         api_key: "user-key",
-        model: "qwen-max",
-        base_url: "https://runtime.example/v1",
+        model: "claude-sonnet-4-5",
+        base_url: "https://runtime.example",
       },
     });
+  });
+
+  it("treats malformed local model settings as absent instead of throwing", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/resume-reviews/analysis", {
+        method: "POST",
+        headers: {
+          cookie: `${RESUME_REVIEW_ACCESS_COOKIE_NAME}=${createResumeReviewAccessCookie(0)}`,
+        },
+        body: JSON.stringify({
+          reviewId: "pack-123",
+          requestId: "req-123",
+          resumeDocumentId: "resume-001",
+          jobDescriptionDocumentId: "jd-001",
+          suggestionCount: 5,
+          localModelSettings: {
+            protocol: 123,
+            apiKey: null,
+            model: "",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

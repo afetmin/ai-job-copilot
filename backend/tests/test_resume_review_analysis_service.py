@@ -31,7 +31,7 @@ def _build_resume_context() -> RetrievalContext:
                 document_id="resume-001",
                 chunk_id="resume-001:chunk:0",
                 content="Built retrieval pipelines with FastAPI and Chroma.",
-                score=0.91,
+                score=0.18,
                 metadata={"document_type": "resume", "filename": "resume.pdf"},
             )
         ],
@@ -46,7 +46,7 @@ def _build_job_context() -> RetrievalContext:
                 document_id="jd-001",
                 chunk_id="jd-001:chunk:1",
                 content="Need strong backend engineering and retrieval system experience.",
-                score=0.88,
+                score=0.52,
                 metadata={"document_type": "job_description", "filename": "jd.pdf"},
             )
         ],
@@ -159,8 +159,10 @@ async def test_analysis_service_streams_markdown_and_citations() -> None:
     assert events[1].metadata.suggestion_count == 3
     assert events[2].citation is not None
     assert events[2].citation.source_type == "resume"
+    assert events[2].citation.relevance_level == "high"
     assert events[3].citation is not None
     assert events[3].citation.source_type == "job_description"
+    assert events[3].citation.relevance_level == "medium"
     assert "Backend Engineer" in generation_provider.stream_payloads[0]
     assert "resume-001:chunk:0" in generation_provider.stream_payloads[0]
     assert "jd-001:chunk:1" in generation_provider.stream_payloads[0]
@@ -221,8 +223,10 @@ async def test_chat_service_streams_context_citations_and_markdown_for_initial_t
     assert events[1].context.suggestion_count == 3
     assert events[2].citation is not None
     assert events[2].citation.source_type == "resume"
+    assert events[2].citation.relevance_level == "high"
     assert events[3].citation is not None
     assert events[3].citation.source_type == "job_description"
+    assert events[3].citation.relevance_level == "medium"
     assert "历史对话" in generation_provider.stream_payloads[0]
     assert "先给我整体分析。" in generation_provider.stream_payloads[0]
     assert "Backend Engineer" in generation_provider.stream_payloads[0]
@@ -328,14 +332,14 @@ async def test_create_generation_provider_prefers_runtime_model_config(
 
     provider = generation.create_generation_provider(
         Settings(
-            llm_provider="openai",
+            llm_protocol="openai_compatible",
             llm_model="fallback-model",
             llm_api_key="fallback-key",
             llm_base_url="https://fallback.example/v1",
             llm_temperature=0.9,
         ),
         runtime_model_config=RuntimeModelConfig(
-            provider="dashscope",
+            protocol="openai_compatible",
             model="runtime-model",
             api_key="runtime-key",
             base_url="https://runtime.example/v1",

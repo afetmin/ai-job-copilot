@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
+import httpx
 from openai import AsyncOpenAI
 
 from ai_job_copilot_backend.core.settings import Settings
 from ai_job_copilot_backend.providers.base import GenerationProvider
 from ai_job_copilot_backend.schemas.resume_review import RuntimeModelConfig
 
-DEFAULT_DASHSCOPE_RESPONSES_BASE_URL = (
-    "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible-mode/v1"
-)
+DEFAULT_OPENAI_COMPATIBLE_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_ANTHROPIC_COMPATIBLE_BASE_URL = "https://api.anthropic.com"
+DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_ANTHROPIC_MAX_TOKENS = 4096
 PROXY_ENV_KEYS = (
     "ALL_PROXY",
     "all_proxy",
@@ -126,18 +129,142 @@ class OpenAIResponsesGenerationProvider(GenerationProvider[str, str]):
         raise ValueError("模型未返回可用内容")
 
 
+class AnthropicMessagesGenerationProvider(GenerationProvider[str, str]):
+    """基于 Anthropic Messages API 的纯文本生成 provider。"""
+
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        model: str,
+        api_key: str,
+        base_url: str,
+        temperature: float = 0.2,
+    ) -> None:
+        self.provider_name = provider_name
+        self._model = model
+        self._temperature = temperature
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": DEFAULT_ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+        )
+
+    async def generate(self, payload: str) -> str:
+        """根据 prompt 生成纯文本结果。"""
+
+        response = await self._client.post(
+            "/messages",
+            json=self._build_request_payload(payload, stream=False),
+        )
+        response.raise_for_status()
+        return self._extract_output_text(response.json())
+
+    async def stream_generate(self, payload: str) -> AsyncIterator[str]:
+        """根据 prompt 流式返回纯文本结果。"""
+
+        async with self._client.stream(
+            "POST",
+            "/messages",
+            json=self._build_request_payload(payload, stream=True),
+        ) as response:
+            response.raise_for_status()
+
+            event_name = "message"
+            data_lines: list[str] = []
+
+            async for line in response.aiter_lines():
+                if line == "":
+                    delta = self._extract_stream_delta(event_name, data_lines)
+                    if delta is not None:
+                        yield delta
+                    event_name = "message"
+                    data_lines = []
+                    continue
+
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()
+                    continue
+
+                if line.startswith("data:"):
+                    data_lines.append(line[5:].strip())
+
+            delta = self._extract_stream_delta(event_name, data_lines)
+            if delta is not None:
+                yield delta
+
+    def _build_request_payload(self, payload: str, *, stream: bool) -> dict[str, Any]:
+        return {
+            "model": self._model,
+            "system": "你是一个严谨的输出助手，必须严格遵循用户给定的格式与边界。",
+            "messages": [{"role": "user", "content": payload}],
+            "max_tokens": DEFAULT_ANTHROPIC_MAX_TOKENS,
+            "temperature": self._temperature,
+            "stream": stream,
+        }
+
+    @staticmethod
+    def _extract_output_text(response_payload: dict[str, Any]) -> str:
+        content_items = response_payload.get("content")
+        if not isinstance(content_items, list):
+            raise ValueError("模型未返回可用内容")
+
+        parts: list[str] = []
+        for item in content_items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+
+        if parts:
+            return "\n".join(parts)
+
+        raise ValueError("模型未返回可用内容")
+
+    @staticmethod
+    def _extract_stream_delta(event_name: str, data_lines: list[str]) -> str | None:
+        if not data_lines:
+            return None
+
+        data = "\n".join(data_lines).strip()
+        if not data or data == "[DONE]":
+            return None
+
+        payload = json.loads(data)
+        if not isinstance(payload, dict):
+            return None
+
+        payload_type = payload.get("type")
+        if event_name != "content_block_delta" and payload_type != "content_block_delta":
+            return None
+
+        delta = payload.get("delta")
+        if not isinstance(delta, dict):
+            return None
+        if delta.get("type") != "text_delta":
+            return None
+        text = delta.get("text")
+        return text if isinstance(text, str) and text else None
+
+
 def _resolve_generation_config(
     settings: Settings,
     runtime_model_config: RuntimeModelConfig | None,
 ) -> tuple[str, str, str, str, float]:
     if runtime_model_config is None:
-        provider_name = settings.llm_provider.strip().lower()
+        protocol = settings.llm_protocol.strip().lower()
         model = settings.llm_model.strip()
         api_key = settings.llm_api_key.strip()
         base_url = settings.llm_base_url.strip()
         temperature = settings.llm_temperature
     else:
-        provider_name = runtime_model_config.provider.strip().lower()
+        protocol = runtime_model_config.protocol.strip().lower()
         model = runtime_model_config.model.strip()
         api_key = runtime_model_config.api_key.strip()
         base_url = runtime_model_config.base_url.strip()
@@ -147,14 +274,14 @@ def _resolve_generation_config(
             else settings.llm_temperature
         )
 
-    if not provider_name:
-        raise ValueError("llm_provider 不能为空，必须显式指定 openai 或 dashscope")
+    if not protocol:
+        raise ValueError("llm_protocol 不能为空，必须显式指定 openai_compatible 或 anthropic_compatible")
     if not model:
         raise ValueError("llm_model 不能为空")
     if not api_key:
         raise ValueError("llm_api_key 不能为空")
 
-    return provider_name, model, api_key, base_url, temperature
+    return protocol, model, api_key, base_url, temperature
 
 
 def create_generation_provider(
@@ -163,29 +290,29 @@ def create_generation_provider(
 ) -> GenerationProvider[str, str]:
     """根据当前配置创建简历优化生成 provider。"""
 
-    provider_name, model, api_key, base_url, temperature = _resolve_generation_config(
+    protocol, model, api_key, base_url, temperature = _resolve_generation_config(
         settings,
         runtime_model_config,
     )
 
-    if provider_name == "openai":
-        resolved_base_url = base_url or settings.openai_base_url
+    if protocol == "openai_compatible":
+        resolved_base_url = base_url or settings.openai_base_url or DEFAULT_OPENAI_COMPATIBLE_BASE_URL
         return OpenAIResponsesGenerationProvider(
-            provider_name="openai_responses",
+            provider_name="openai_compatible_responses",
             model=model,
             api_key=api_key,
             base_url=resolved_base_url,
             temperature=temperature,
         )
 
-    if provider_name == "dashscope":
-        resolved_base_url = base_url or DEFAULT_DASHSCOPE_RESPONSES_BASE_URL
-        return OpenAIResponsesGenerationProvider(
-            provider_name="dashscope_responses",
+    if protocol == "anthropic_compatible":
+        resolved_base_url = base_url or DEFAULT_ANTHROPIC_COMPATIBLE_BASE_URL
+        return AnthropicMessagesGenerationProvider(
+            provider_name="anthropic_compatible_messages",
             model=model,
             api_key=api_key,
             base_url=resolved_base_url,
             temperature=temperature,
         )
 
-    raise ValueError(f"不支持的 llm_provider={provider_name}")
+    raise ValueError(f"不支持的 llm_protocol={protocol}")

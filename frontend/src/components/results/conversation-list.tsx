@@ -10,18 +10,18 @@ type ConversationListProps = {
 
 function formatStatus(status: ResumeReviewRecord["analysisStatus"]): string {
   if (status === "completed") {
-    return "READY";
+    return "已完成";
   }
 
   if (status === "streaming") {
-    return "STREAMING";
+    return "生成中";
   }
 
   if (status === "error") {
-    return "ERROR";
+    return "异常";
   }
 
-  return "PENDING";
+  return "待开始";
 }
 
 function formatUpdatedAt(timestamp: number): string {
@@ -48,14 +48,22 @@ export function ConversationList({
 
   if (sortedReviews.length === 0) {
     return (
-      <div className="border-2 border-dashed border-foreground/25 bg-background px-4 py-5 text-sm leading-6 text-muted-foreground">
-        当前还没有可选对话，请先从工作台创建一次。
+      <div
+        aria-label="对话列表滚动区域"
+        className="paper-scrollbar min-h-0 flex-1 overflow-y-auto pr-1"
+      >
+        <div className="border-2 border-dashed border-foreground/25 bg-background px-4 py-5 text-sm leading-6 text-muted-foreground">
+          当前还没有可选对话，请先从工作台创建一次。
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div
+      aria-label="对话列表滚动区域"
+      className="paper-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto pr-1"
+    >
       {sortedReviews.map((review) => {
         const isActive = review.reviewId === activeReviewId;
 
@@ -63,7 +71,7 @@ export function ConversationList({
           <button
             aria-pressed={isActive}
             key={review.reviewId}
-            className={`w-full border-2 px-4 py-3 text-left shadow-[4px_4px_0_#161616] transition-colors ${
+            className={`w-full border-2 px-3 py-3 text-left shadow-[4px_4px_0_#161616] transition-colors ${
               isActive
                 ? "border-foreground bg-[#161616] text-[#f7f2ea]"
                 : "border-foreground bg-card text-foreground"
@@ -86,7 +94,7 @@ export function ConversationList({
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[0.64rem] uppercase tracking-[0.08em] opacity-60">
-              <span>{review.suggestionCount} Suggestions</span>
+              <span>建议 {review.suggestionCount} 条</span>
               <span className="text-right">{formatUpdatedAt(review.updatedAt)}</span>
             </div>
 

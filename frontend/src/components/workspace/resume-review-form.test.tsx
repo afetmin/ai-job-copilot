@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { pushMock, scrollIntoViewMock } = vi.hoisted(() => ({
@@ -8,6 +8,11 @@ const { pushMock, scrollIntoViewMock } = vi.hoisted(() => ({
 
 const { resolveResumeReviewAccessGateMock } = vi.hoisted(() => ({
   resolveResumeReviewAccessGateMock: vi.fn(),
+}));
+
+const { getProviderSettingsMock, saveProviderSettingsMock } = vi.hoisted(() => ({
+  getProviderSettingsMock: vi.fn(),
+  saveProviderSettingsMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -26,6 +31,11 @@ vi.mock("@/lib/resume-review-access", async () => {
     resolveResumeReviewAccessGate: resolveResumeReviewAccessGateMock,
   };
 });
+
+vi.mock("@/lib/resume-review-db", () => ({
+  getProviderSettings: getProviderSettingsMock,
+  saveProviderSettings: saveProviderSettingsMock,
+}));
 
 import {
   RESUME_REVIEW_SESSION_STORAGE_KEY,
@@ -66,10 +76,22 @@ describe("ResumeReviewForm", () => {
     pushMock.mockReset();
     scrollIntoViewMock.mockReset();
     resolveResumeReviewAccessGateMock.mockReset();
+    getProviderSettingsMock.mockReset();
+    saveProviderSettingsMock.mockReset();
     resolveResumeReviewAccessGateMock.mockResolvedValue({
       remainingFreeAnalyses: 2,
       requiresUserModelConfig: false,
       hasLocalProviderSettings: false,
+    });
+    getProviderSettingsMock.mockResolvedValue(null);
+    saveProviderSettingsMock.mockResolvedValue({
+      id: "provider-settings",
+      protocol: "openai_compatible",
+      apiKey: "sk-test",
+      model: "gpt-4.1-mini",
+      baseUrl: "https://api.openai.com/v1",
+      createdAt: 1,
+      updatedAt: 2,
     });
     window.sessionStorage.clear();
     vi.stubGlobal("fetch", fetchMock);
@@ -87,12 +109,47 @@ describe("ResumeReviewForm", () => {
   it("shows the first step by default and switches panels from the stepper", () => {
     render(<ResumeReviewForm />);
 
+    expect(screen.getByRole("heading", { name: "简历对岗优化工作台" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "收集候选人简历、对齐目标 JD、配置建议条数，生成可追踪的分析记录。让经历对准岗位，让改写有据可依。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("控制台")).not.toBeInTheDocument();
+    expect(screen.queryByText("实时视图")).not.toBeInTheDocument();
+    expect(screen.queryByText("可追踪请求上下文")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前摘要")).not.toBeInTheDocument();
+    expect(screen.queryByText("需要保留原始文档时，再补充 PDF 或 TXT。")).not.toBeInTheDocument();
+
     expect(screen.getByRole("heading", { name: "简历材料" })).toBeInTheDocument();
 
     openStep("02 岗位上下文");
 
     expect(screen.getByRole("heading", { name: "岗位上下文" })).toBeInTheDocument();
     expect(scrollIntoViewMock).toHaveBeenCalled();
+  });
+
+  it("opens model settings from the workspace header", async () => {
+    render(<ResumeReviewForm />);
+
+    fireEvent.click(screen.getByRole("button", { name: "模型配置" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "暂存本地" })).toBeInTheDocument();
+    expect(screen.getAllByText("模型设置").length).toBeGreaterThan(0);
+  });
+
+  it("shows the selected file name inline in the upload control", () => {
+    render(<ResumeReviewForm />);
+
+    const resumeFileInput = screen.getByLabelText("简历文件（PDF/TXT）");
+    const file = new File(["resume body"], "resume.pdf", { type: "application/pdf" });
+
+    fireEvent.change(resumeFileInput, { target: { files: [file] } });
+
+    const uploadControl = resumeFileInput.closest("div");
+    expect(uploadControl).not.toBeNull();
+    expect(within(uploadControl as HTMLElement).getByText("resume.pdf")).toBeInTheDocument();
   });
 
   it.each([

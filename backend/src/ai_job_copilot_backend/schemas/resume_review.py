@@ -26,11 +26,14 @@ class ResumeReviewChatMessageInput(BaseModel):
 class RuntimeModelConfig(BaseModel):
     """请求级大模型配置覆盖。"""
 
-    provider: str
+    protocol: str
     model: str
     api_key: str
     base_url: str = ""
     temperature: float | None = None
+
+
+RelevanceLevel = Literal["high", "medium", "low"]
 
 
 class ResumeReviewSuggestionSource(BaseModel):
@@ -108,6 +111,7 @@ class ResumeReviewCitation(BaseModel):
     title: str
     excerpt: str
     score: float | None = None
+    relevance_level: RelevanceLevel | None = None
 
 
 class ResumeReviewAnalysisMetadata(BaseModel):

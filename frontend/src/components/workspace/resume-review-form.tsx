@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   BriefcaseBusiness,
   CheckCheck,
@@ -8,11 +8,13 @@ import {
   ListTodo,
   NotebookTabs,
   Send,
+  Settings2,
   SlidersHorizontal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { ModelSettingsCard } from "@/components/results/model-settings-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,11 @@ import {
   resolveResumeReviewAccessGate,
   shouldBlockResumeReviewCreation,
 } from "@/lib/resume-review-access";
+import type {
+  ProviderSettingsInput,
+  ProviderSettingsRecord,
+} from "@/lib/resume-review-db";
+import { getProviderSettings, saveProviderSettings } from "@/lib/resume-review-db";
 
 import { type GenerationStatus } from "./generation-status-card";
 
@@ -83,7 +90,7 @@ type ProcessStep = {
 
 function WorkspaceFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-[2px] border-2 border-foreground/85 bg-card p-5 shadow-[10px_10px_0_rgba(0,0,0,0.08)] sm:p-6">
+    <div className="rounded-[2px] border-2 border-foreground/85 bg-card p-4 shadow-[8px_8px_0_rgba(0,0,0,0.08)] sm:p-5">
       {children}
     </div>
   );
@@ -225,7 +232,7 @@ function StatusPill({ label, tone }: { label: string; tone: StepTone }) {
 
   return (
     <span
-      className={`inline-flex w-fit items-center rounded-[2px] border px-3 py-1.5 font-mono text-[0.7rem] uppercase tracking-[0.08em] ${toneClassName}`}
+      className={`inline-flex w-fit items-center rounded-[2px] border px-2.5 py-1 font-mono text-[0.66rem] uppercase tracking-[0.08em] ${toneClassName}`}
     >
       {label}
     </span>
@@ -247,41 +254,30 @@ function StepSection({
       id={`step-panel-${step}`}
     >
       <WorkspaceFrame>
-        <div className="flex flex-col gap-4 border-b-2 border-foreground/10 pb-4 md:flex-row md:items-start md:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] border-2 border-foreground bg-accent font-mono text-[0.82rem] uppercase tracking-[0.08em] text-accent-foreground">
+        <div className="flex flex-col gap-3 border-b-2 border-foreground/10 pb-3 md:flex-row md:items-start md:justify-between">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] border-2 border-foreground bg-accent font-mono text-[0.74rem] uppercase tracking-[0.08em] text-accent-foreground">
               {step}
             </div>
             <div className="min-w-0">
               <h2
-                className="font-mono text-[1.25rem] font-normal uppercase tracking-[0.08em] text-foreground"
+                className="font-mono text-[1.05rem] font-normal uppercase tracking-[0.08em] text-foreground sm:text-[1.12rem]"
                 id={`step-panel-heading-${step}`}
               >
                 {title}
               </h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              <p className="mt-1.5 max-w-2xl text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
                 {description}
               </p>
             </div>
           </div>
-          <span className="inline-flex w-fit items-center rounded-[2px] border-2 border-foreground/80 bg-secondary px-3 py-2 font-mono text-[0.72rem] uppercase tracking-[0.08em] text-foreground">
+          <span className="inline-flex w-fit items-center rounded-[2px] border-2 border-foreground/80 bg-secondary px-2.5 py-1.5 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-foreground">
             {label}
           </span>
         </div>
-        <div className="mt-5">{children}</div>
+        <div className="mt-4">{children}</div>
       </WorkspaceFrame>
     </section>
-  );
-}
-
-function StepConnector({ tone }: { tone: StepTone }) {
-  return (
-    <div
-      aria-hidden="true"
-      className={`h-[2px] w-8 shrink-0 sm:w-12 ${
-        tone === "ready" ? "bg-emerald-500/80" : "bg-foreground/18"
-      }`}
-    />
   );
 }
 
@@ -308,7 +304,7 @@ function ProcessStepBlock({
     <button
       aria-label={`${step} ${title}`}
       aria-pressed={isActive}
-      className={`flex h-[92px] w-[92px] shrink-0 flex-col items-start justify-between rounded-[2px] border-2 px-3 py-3 text-left transition-all ${className}`}
+      className={`flex min-h-[86px] w-full flex-col items-start justify-between rounded-[2px] border-2 px-3 py-3 text-left transition-all ${className}`}
       onClick={() => onSelect(step)}
       type="button"
     >
@@ -317,8 +313,8 @@ function ProcessStepBlock({
         <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
       </div>
       <div className="w-full">
-        <p className="font-mono text-[0.78rem] uppercase tracking-[0.08em]">{shortTitle}</p>
-        <p className="mt-1 text-[0.68rem] leading-4 opacity-80">{stateLabel}</p>
+        <p className="font-mono text-[0.74rem] uppercase tracking-[0.08em]">{shortTitle}</p>
+        <p className="mt-1 text-[0.66rem] leading-4 opacity-80">{stateLabel}</p>
       </div>
     </button>
   );
@@ -346,50 +342,47 @@ function NarrativePanel({
   footer?: ReactNode;
 }) {
   return (
-    <div className="rounded-[2px] border-2 border-foreground bg-foreground p-5 text-background shadow-[12px_12px_0_rgba(0,0,0,0.18)]">
-      <div className="space-y-5">
-        <div className="border-b border-white/14 pb-5">
+    <div className="h-full rounded-[2px] border-2 border-foreground bg-foreground p-4 text-background shadow-[10px_10px_0_rgba(0,0,0,0.18)]">
+      <div className="space-y-4">
+        <div className="border-b border-white/14 pb-4">
           <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-white/58">
             当前状态
           </p>
-          <h3 className="mt-2 font-mono text-[1.05rem] uppercase tracking-[0.08em] text-white/92">
+          <h3 className="mt-1.5 font-mono text-[0.96rem] uppercase tracking-[0.08em] text-white/92">
             {statusTitle}
           </h3>
-          <div className="mt-3">
+          <div className="mt-2.5">
             <StatusPill label={statusLabel} tone={statusTone} />
           </div>
-          <p className="mt-4 text-sm leading-6 text-white/78">{statusDescription}</p>
+          <p className="mt-3 text-[0.82rem] leading-5 text-white/78 sm:text-sm">{statusDescription}</p>
         </div>
 
-        <div className="border-b border-white/14 pb-5">
-          <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-white/58">
-            这一步做什么
-          </p>
-          <h3 className="mt-2 font-mono text-[1.05rem] uppercase tracking-[0.08em] text-white/92">
-            {actionTitle}
-          </h3>
-          <div className="mt-4 space-y-3 text-sm leading-6 text-white/78">
-            {actionBody.map((item) => (
-              <p key={item}>{item}</p>
-            ))}
+        <div className="space-y-3">
+          <div>
+            <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-white/58">
+              这一步
+            </p>
+            <h3 className="mt-1.5 font-mono text-[0.96rem] uppercase tracking-[0.08em] text-white/92">
+              {actionTitle}
+            </h3>
+            <p className="mt-2 text-[0.82rem] leading-5 text-white/78 sm:text-sm">
+              {actionBody[0]}
+            </p>
+          </div>
+          <div className="border-t border-white/14 pt-3">
+            <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-white/58">
+              下一步
+            </p>
+            <h3 className="mt-1.5 font-mono text-[0.96rem] uppercase tracking-[0.08em] text-white/92">
+              {nextTitle}
+            </h3>
+            <p className="mt-2 text-[0.82rem] leading-5 text-white/78 sm:text-sm">
+              {nextBody[0]}
+            </p>
           </div>
         </div>
 
-        <div>
-          <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-white/58">
-            下一步
-          </p>
-          <h3 className="mt-2 font-mono text-[1.05rem] uppercase tracking-[0.08em] text-white/92">
-            {nextTitle}
-          </h3>
-          <div className="mt-4 space-y-3 text-sm leading-6 text-white/78">
-            {nextBody.map((item) => (
-              <p key={item}>{item}</p>
-            ))}
-          </div>
-        </div>
-
-        {footer ? <div className="border-t border-white/14 pt-5">{footer}</div> : null}
+        {footer ? <div className="border-t border-white/14 pt-4">{footer}</div> : null}
       </div>
     </div>
   );
@@ -494,6 +487,8 @@ export function ResumeReviewForm() {
   const [targetRoleValue, setTargetRoleValue] = useState("");
   const [resumeFileName, setResumeFileName] = useState<string | null>(null);
   const [jobDescriptionFileName, setJobDescriptionFileName] = useState<string | null>(null);
+  const [providerSettings, setProviderSettings] = useState<ProviderSettingsRecord | null>(null);
+  const [isModelSettingsOpen, setIsModelSettingsOpen] = useState(false);
 
   const isUploading = status === "uploading";
   const hasResumePreview = resumeTextValue.trim().length > 0 || resumeFileName !== null;
@@ -532,6 +527,21 @@ export function ResumeReviewForm() {
       tone: submitState.tone,
     },
   ];
+
+  useEffect(() => {
+    if (!isModelSettingsOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsModelSettingsOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isModelSettingsOpen]);
 
   function scrollToPanel() {
     panelTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -661,26 +671,46 @@ export function ResumeReviewForm() {
     setJobDescriptionFileName(null);
   }
 
+  async function handleSaveProviderSettings(input: ProviderSettingsInput) {
+    await saveProviderSettings(input);
+    setProviderSettings(await getProviderSettings());
+  }
+
+  async function handleOpenModelSettings() {
+    setProviderSettings(await getProviderSettings());
+    setIsModelSettingsOpen(true);
+  }
+
   return (
     <AppShell
-      eyebrow="受保护工作台"
-      title="简历优化工作台"
-      subtitle="收集候选人简历、对齐目标 JD、配置建议条数，并把整条优化分析链路保存为可追踪结果。"
+      headerActions={
+        <Button
+          onClick={() => void handleOpenModelSettings()}
+          size="lg"
+          type="button"
+          variant="secondary"
+        >
+          <span className="flex items-center gap-2">
+            <Settings2 className="h-4 w-4" strokeWidth={1.5} />
+            模型配置
+          </span>
+        </Button>
+      }
+      title="简历对岗优化工作台"
+      subtitle="收集候选人简历、对齐目标 JD、配置建议条数，生成可追踪的分析记录。让经历对准岗位，让改写有据可依。"
     >
-      <div className="space-y-5">
-        <div className="sticky top-3 z-30">
-          <div className="-mx-1 overflow-x-auto px-1 pb-2">
-            <div className="min-w-max rounded-[2px] border-2 border-foreground/85 bg-card/95 p-3 shadow-[10px_10px_0_rgba(0,0,0,0.08)] backdrop-blur">
-              <div className="flex items-center gap-3">
-                {processSteps.map((item, index) => (
-                  <Fragment key={item.step}>
-                    <ProcessStepBlock
-                      {...item}
-                      isActive={activeStep === item.step}
-                      onSelect={handleSelectStep}
-                    />
-                    {index < processSteps.length - 1 ? <StepConnector tone={item.tone} /> : null}
-                  </Fragment>
+      <div className="space-y-4">
+        <div className="sticky top-2 z-30">
+          <div className="-mx-1 overflow-x-auto px-1 pb-1">
+            <div className="min-w-max rounded-[2px] border-2 border-foreground/85 bg-card/95 p-2 shadow-[8px_8px_0_rgba(0,0,0,0.08)] backdrop-blur">
+              <div className="grid min-w-[720px] grid-cols-4 gap-3">
+                {processSteps.map((item) => (
+                  <ProcessStepBlock
+                    {...item}
+                    key={item.step}
+                    isActive={activeStep === item.step}
+                    onSelect={handleSelectStep}
+                  />
                 ))}
               </div>
             </div>
@@ -696,30 +726,32 @@ export function ResumeReviewForm() {
               step="01"
               title="简历材料"
             >
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_340px]">
-                <div className="rounded-[2px] border-2 border-foreground/80 bg-background p-5 shadow-[10px_10px_0_rgba(0,0,0,0.06)]">
-                  <div className="space-y-5">
-                    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_250px]">
-                      <div className="space-y-5">
+              <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.2fr)_300px]">
+                <div className="h-full rounded-[2px] border-2 border-foreground/80 bg-background p-4 shadow-[8px_8px_0_rgba(0,0,0,0.06)]">
+                  <div className="space-y-4">
+                    <div className="grid gap-4">
+                      <div className="space-y-4">
                         <div className="space-y-2">
                           <Label htmlFor="resumeText">简历内容</Label>
                           <Textarea
+                            className="min-h-[190px] px-3 py-3 text-[0.92rem] leading-5"
                             id="resumeText"
                             name="resumeText"
                             placeholder="在这里粘贴结构化简历、项目亮点或候选人材料。"
                             value={resumeTextValue}
                             onChange={(event) => setResumeTextValue(event.target.value)}
                           />
-                          <p className="text-sm leading-6 text-muted-foreground">
+                          <p className="text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
                             优先粘贴结构化文本，方便后续检索、排查和生成。
                           </p>
                         </div>
                       </div>
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         <div className="space-y-2">
                           <Label htmlFor="resumeFile">简历文件（PDF/TXT）</Label>
                           <Input
                             accept=".pdf,.txt,application/pdf,text/plain"
+                            className="lg:pt-0"
                             id="resumeFile"
                             name="resumeFile"
                             onChange={(event) =>
@@ -727,34 +759,22 @@ export function ResumeReviewForm() {
                             }
                             type="file"
                           />
-                          <p className="text-sm leading-6 text-muted-foreground">
-                            需要保留原始文档时，再补充 PDF 或 TXT。
+                          <p className="text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
+                            文本优先，附件补充原始材料。
                           </p>
-                        </div>
-                        <div className="rounded-[2px] border-2 border-foreground/80 bg-background px-4 py-4 shadow-[6px_6px_0_rgba(0,0,0,0.05)]">
-                          <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
-                            当前摘要
-                          </p>
-                          <div className="mt-3 space-y-3 text-sm leading-6 text-foreground">
-                            <p>{resumeTextValue.trim() ? "已填写简历文本" : "未填写简历文本"}</p>
-                            <p>{resumeFileName ? `已选择 ${resumeFileName}` : "未上传简历文件"}</p>
-                          </div>
                         </div>
                       </div>
                     </div>
                     {errors.resume ? (
-                      <p className="text-sm font-medium leading-6 text-destructive">{errors.resume}</p>
+                      <p className="text-sm font-medium leading-5 text-destructive">{errors.resume}</p>
                     ) : null}
                   </div>
                 </div>
 
                 <NarrativePanel
-                  actionBody={[
-                    "这里承接简历、项目亮点、经历摘要，不要混入 JD 约束。",
-                    "如果你已经有结构化简历文本，优先贴文本，PDF 作为原始附件补充。",
-                  ]}
+                  actionBody={["只放候选人经历、项目亮点和经历摘要，不混入 JD。"]}
                   actionTitle="沉淀候选人上下文"
-                  nextBody={["切到第 02 步，把职责、要求、评估维度写在一起，形成完整对照面。"]}
+                  nextBody={["补齐后切到第 02 步，把岗位职责和要求写在一起。"]}
                   nextTitle="进入岗位上下文"
                   statusDescription={
                     hasResumePreview
@@ -775,30 +795,32 @@ export function ResumeReviewForm() {
               step="02"
               title="岗位上下文"
             >
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_340px]">
-                <div className="rounded-[2px] border-2 border-foreground/80 bg-background p-5 shadow-[10px_10px_0_rgba(0,0,0,0.06)]">
-                  <div className="space-y-5">
-                    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_250px]">
-                      <div className="space-y-5">
+              <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.2fr)_300px]">
+                <div className="h-full rounded-[2px] border-2 border-foreground/80 bg-background p-4 shadow-[8px_8px_0_rgba(0,0,0,0.06)]">
+                  <div className="space-y-4">
+                    <div className="grid gap-4">
+                      <div className="space-y-4">
                         <div className="space-y-2">
                           <Label htmlFor="jobDescriptionText">岗位描述</Label>
                           <Textarea
+                            className="min-h-[190px] px-3 py-3 text-[0.92rem] leading-5"
                             id="jobDescriptionText"
                             name="jobDescriptionText"
                             placeholder="在这里粘贴目标岗位说明、职责要求和评估维度。"
                             value={jobDescriptionTextValue}
                             onChange={(event) => setJobDescriptionTextValue(event.target.value)}
                           />
-                          <p className="text-sm leading-6 text-muted-foreground">
+                          <p className="text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
                             这里适合粘贴 JD 正文、核心要求和团队预期。
                           </p>
                         </div>
                       </div>
-                      <div className="space-y-4">
+                      <div className="space-y-3">
                         <div className="space-y-2">
                           <Label htmlFor="jobDescriptionFile">岗位描述文件（PDF/TXT）</Label>
                           <Input
                             accept=".pdf,.txt,application/pdf,text/plain"
+                            className="lg:pt-0"
                             id="jobDescriptionFile"
                             name="jobDescriptionFile"
                             onChange={(event) =>
@@ -806,29 +828,14 @@ export function ResumeReviewForm() {
                             }
                             type="file"
                           />
-                          <p className="text-sm leading-6 text-muted-foreground">
-                            有完整岗位文档时，再补充 PDF 或 TXT。
+                          <p className="text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
+                            把 JD 正文和附件尽量收敛在这一侧。
                           </p>
-                        </div>
-                        <div className="rounded-[2px] border-2 border-foreground/80 bg-background px-4 py-4 shadow-[6px_6px_0_rgba(0,0,0,0.05)]">
-                          <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
-                            当前摘要
-                          </p>
-                          <div className="mt-3 space-y-3 text-sm leading-6 text-foreground">
-                            <p>
-                              {jobDescriptionTextValue.trim() ? "已填写岗位文本" : "未填写岗位文本"}
-                            </p>
-                            <p>
-                              {jobDescriptionFileName
-                                ? `已选择 ${jobDescriptionFileName}`
-                                : "未上传岗位文件"}
-                            </p>
-                          </div>
                         </div>
                       </div>
                     </div>
                     {errors.jobDescription ? (
-                      <p className="text-sm font-medium leading-6 text-destructive">
+                      <p className="text-sm font-medium leading-5 text-destructive">
                         {errors.jobDescription}
                       </p>
                     ) : null}
@@ -836,12 +843,9 @@ export function ResumeReviewForm() {
                 </div>
 
                 <NarrativePanel
-                  actionBody={[
-                    "把职责、硬性要求、优先级要求和评估维度放在同一处，避免信息分散。",
-                    "这一步越完整，后续简历优化建议越能对齐真实 JD。",
-                  ]}
+                  actionBody={["把岗位职责、硬性要求和评估维度收敛到同一处。"]}
                   actionTitle="收敛岗位要求"
-                  nextBody={["切到第 03 步，确认目标岗位和建议条数，准备进入提交阶段。"]}
+                  nextBody={["切到第 03 步，确认目标岗位和建议条数。"]}
                   nextTitle="进入参数设置"
                   statusDescription={
                     hasJobDescriptionPreview
@@ -862,14 +866,15 @@ export function ResumeReviewForm() {
               step="03"
               title="调整参数"
             >
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_340px]">
-                <div className="rounded-[2px] border-2 border-foreground/80 bg-background p-5 shadow-[10px_10px_0_rgba(0,0,0,0.06)]">
-                  <div className="space-y-5">
+              <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.2fr)_300px]">
+                <div className="h-full rounded-[2px] border-2 border-foreground/80 bg-background p-4 shadow-[8px_8px_0_rgba(0,0,0,0.06)]">
+                  <div className="space-y-4">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="targetRole">目标岗位</Label>
                         <Input
                           autoComplete="off"
+                          className="h-11"
                           id="targetRole"
                           name="targetRole"
                           onChange={(event) => setTargetRoleValue(event.target.value)}
@@ -880,6 +885,7 @@ export function ResumeReviewForm() {
                       <div className="space-y-2">
                         <Label htmlFor="suggestionCount">建议条数</Label>
                         <Input
+                          className="h-11"
                           defaultValue={DEFAULT_SUGGESTION_COUNT}
                           id="suggestionCount"
                           max={20}
@@ -891,7 +897,7 @@ export function ResumeReviewForm() {
                     </div>
 
                     {errors.suggestionCount ? (
-                      <p className="text-sm font-medium leading-6 text-destructive">
+                      <p className="text-sm font-medium leading-5 text-destructive">
                         {errors.suggestionCount}
                       </p>
                     ) : null}
@@ -911,7 +917,7 @@ export function ResumeReviewForm() {
                       ].map(({ icon: Icon, title, value }) => (
                         <div
                           key={title}
-                          className="rounded-[2px] border-2 border-foreground/80 bg-secondary px-4 py-4 shadow-[6px_6px_0_rgba(0,0,0,0.05)]"
+                          className="rounded-[2px] border-2 border-foreground/80 bg-secondary px-3 py-3 shadow-[6px_6px_0_rgba(0,0,0,0.05)]"
                         >
                           <div className="flex items-center gap-3">
                             <div className="flex h-8 w-8 items-center justify-center rounded-[2px] border-2 border-foreground bg-background">
@@ -921,7 +927,7 @@ export function ResumeReviewForm() {
                               {title}
                             </p>
                           </div>
-                          <p className="mt-3 text-sm leading-6 text-muted-foreground">{value}</p>
+                          <p className="mt-2 text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">{value}</p>
                         </div>
                       ))}
                     </div>
@@ -929,12 +935,9 @@ export function ResumeReviewForm() {
                 </div>
 
                 <NarrativePanel
-                  actionBody={[
-                    "参数只影响生成方式，不再重复要求你确认前两步材料。",
-                    "目标岗位适合在你想让修改建议更贴近真实 JD 时填写；否则保持为空即可。",
-                  ]}
+                  actionBody={["这里只配置生成方式，不再重复确认前两步材料。"]}
                   actionTitle="收紧分析口径"
-                  nextBody={["第 04 步会读取当前表单并直接发起创建请求，成功后跳转到结果页。"]}
+                  nextBody={["第 04 步会直接提交当前表单并跳转到结果页。"]}
                   nextTitle="进入提交分析"
                   statusDescription={parameterState.description}
                   statusLabel={parameterState.label}
@@ -951,32 +954,18 @@ export function ResumeReviewForm() {
               step="04"
               title="提交分析"
             >
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_360px]">
-                <div className="rounded-[2px] border-2 border-foreground/80 bg-background p-5 shadow-[10px_10px_0_rgba(0,0,0,0.06)]">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[2px] border-2 border-foreground bg-accent text-accent-foreground">
-                        <Send className="h-4 w-4" strokeWidth={1.5} />
-                      </div>
-                      <div>
-                        <p className="font-mono text-[0.76rem] uppercase tracking-[0.08em] text-muted-foreground">
-                          04 / 提交分析
-                        </p>
-                        <h2 className="mt-2 font-mono text-[1.3rem] font-normal uppercase tracking-[0.08em] text-foreground">
-                          提交分析
-                        </h2>
-                      </div>
-                    </div>
+              <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.12fr)_300px]">
+                <div className="h-full rounded-[2px] border-2 border-foreground/80 bg-background p-4 shadow-[8px_8px_0_rgba(0,0,0,0.06)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 text-[0.82rem] leading-5 text-muted-foreground sm:text-sm">
+                      {isFormReady
+                        ? "主输入已补齐。这里会直接提交当前表单，并保持创建、存储和跳转逻辑。"
+                        : "当前只能预览提交流程。补齐简历和岗位材料后，分析按钮才会启用。"}
+                    </p>
                     <StatusPill label={submitState.label} tone={submitState.tone} />
                   </div>
 
-                  <p className="mt-4 text-sm leading-6 text-muted-foreground">
-                    {isFormReady
-                      ? "主输入已补齐。这里会直接提交当前表单，并保持创建、存储和跳转逻辑。"
-                      : "当前只能预览提交流程。补齐简历和岗位材料后，分析按钮才会启用。"}
-                  </p>
-
-                  <div className="mt-5 grid gap-3">
+                  <div className="mt-4 grid gap-3 lg:grid-cols-3">
                     {[
                       {
                         title: "01 / 简历材料",
@@ -1008,43 +997,40 @@ export function ResumeReviewForm() {
                     ].map((item) => (
                       <div
                         key={item.title}
-                        className="rounded-[2px] border border-foreground/15 bg-secondary px-4 py-3 text-sm leading-6 text-muted-foreground"
+                        className="rounded-[2px] border border-foreground/15 bg-secondary px-3 py-3 text-[0.82rem] leading-5 text-muted-foreground sm:text-sm"
                       >
                         <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-foreground">
                           {item.title}
                         </p>
-                        <p className="mt-2 text-foreground">{item.status}</p>
+                        <p className="mt-1.5 text-foreground">{item.status}</p>
                         <p className="mt-1">{item.summary}</p>
                       </div>
                     ))}
                   </div>
 
                   {errors.form ? (
-                    <p className="mt-4 text-sm font-medium leading-6 text-destructive">{errors.form}</p>
+                    <p className="mt-3 text-sm font-medium leading-5 text-destructive">{errors.form}</p>
                   ) : null}
 
-                  <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-                    <Button disabled={!isFormReady || isUploading} size="lg" type="submit">
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                    <Button disabled={!isFormReady || isUploading} type="submit">
                       <span className="flex w-full items-center justify-between gap-3">
                         <span>{isUploading ? "上传中..." : "开始分析简历"}</span>
                         <Send className="h-4 w-4" strokeWidth={1.5} />
                       </span>
                     </Button>
-                    <Button disabled={isUploading} size="lg" type="reset" variant="secondary">
+                    <Button disabled={isUploading} type="reset" variant="secondary">
                       清空表单
                     </Button>
                   </div>
                 </div>
 
                 <NarrativePanel
-                  actionBody={[
-                    "当前页会把已有表单数据提交到创建接口，成功后把响应写入 `sessionStorage`。",
-                    "随后页面会跳转到结果页，继续读取准备好的分析请求数据。",
-                  ]}
+                  actionBody={["这里会提交当前表单，并把结果写入本地会话后跳转。"]}
                   actionTitle="解释分析流程"
                   nextBody={[
                     isFormReady
-                      ? "确认无误后直接触发分析，请求成功后会进入结果页。"
+                      ? "确认无误后直接触发分析，成功后进入结果页。"
                       : "先回到前两步补齐主输入，再回来执行分析。",
                   ]}
                   nextTitle={isFormReady ? "直接分析" : "返回补齐输入"}
@@ -1058,6 +1044,47 @@ export function ResumeReviewForm() {
           </div>
         </form>
       </div>
+
+      {isModelSettingsOpen ? (
+        <div
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 py-6"
+          role="dialog"
+        >
+          <button
+            aria-label="关闭模型配置弹窗"
+            className="absolute inset-0"
+            onClick={() => setIsModelSettingsOpen(false)}
+            type="button"
+          />
+          <div className="relative z-10 w-full max-w-[560px] border-2 border-foreground bg-[rgba(251,247,242,0.98)] p-5 shadow-[10px_10px_0_#161616] sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b-2 border-foreground/10 pb-4">
+              <div>
+                <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
+                  模型配置
+                </p>
+                <h2 className="mt-2 font-mono text-[1.2rem] uppercase tracking-[0.08em]">
+                  暂存本地
+                </h2>
+              </div>
+              <Button
+                onClick={() => setIsModelSettingsOpen(false)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                关闭
+              </Button>
+            </div>
+            <div className="mt-5">
+              <ModelSettingsCard
+                onSave={handleSaveProviderSettings}
+                settings={providerSettings}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppShell>
   );
 }

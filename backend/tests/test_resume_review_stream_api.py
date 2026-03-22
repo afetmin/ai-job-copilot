@@ -26,7 +26,7 @@ class StubChatStreamService:
         assert [message.role for message in request.messages] == ["system", "user"]
         assert request.messages[1].content == "先给我整体分析。"
         assert request.runtime_model_config is not None
-        assert request.runtime_model_config.provider == "dashscope"
+        assert request.runtime_model_config.protocol == "anthropic_compatible"
         assert request.runtime_model_config.api_key == "user-key"
         assert request.runtime_model_config.model == "user-model"
 
@@ -89,10 +89,10 @@ def test_resume_review_chat_request_exposes_messages_array() -> None:
             ResumeReviewChatMessageInput(role="user", content="先给我整体分析。"),
         ],
         runtime_model_config=RuntimeModelConfig(
-            provider="dashscope",
+            protocol="anthropic_compatible",
             api_key="user-key",
             model="user-model",
-            base_url="https://runtime.example/v1",
+            base_url="https://runtime.example",
             temperature=0.3,
         ),
     )
@@ -192,10 +192,10 @@ def test_chat_stream_endpoint_returns_unified_sse_events() -> None:
                 {"role": "user", "content": "先给我整体分析。"},
             ],
             "runtime_model_config": {
-                "provider": "dashscope",
+                "protocol": "anthropic_compatible",
                 "model": "user-model",
                 "api_key": "user-key",
-                "base_url": "https://runtime.example/v1",
+                "base_url": "https://runtime.example",
                 "temperature": 0.3,
             },
         },

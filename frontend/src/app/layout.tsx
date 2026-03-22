@@ -12,8 +12,8 @@ const aeonikMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "AI 求职助手",
-  description: "用于简历分析、JD 对齐与改写建议生成的工作台。",
+  title: "AI 求职助手｜简历对岗优化平台",
+  description: "用于简历诊断、岗位对齐和可执行改写建议生成的一站式工作台。",
 };
 
 export default function RootLayout({

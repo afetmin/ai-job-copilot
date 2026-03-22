@@ -25,7 +25,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
       }
 
       return (
-        <div className={cn("w-full", className)}>
+        <div className={cn("paper-field-group w-full", className)}>
           <input
             {...props}
             ref={ref}
@@ -41,7 +41,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
             )}
             htmlFor={props.id}
           >
-            <span className="flex min-h-14 items-center gap-3 rounded-[2px] border-2 border-foreground bg-card px-3 py-2 text-sm text-foreground shadow-[4px_4px_0_rgba(17,17,17,0.08)] transition-[box-shadow,border-color,background-color] duration-200 ease-out">
+            <span className="paper-field-group-surface flex min-h-14 items-center gap-3 rounded-[2px] border-2 border-foreground bg-card px-3 py-2 text-sm text-foreground shadow-[4px_4px_0_rgba(17,17,17,0.08)]">
               <span className="relative inline-flex shrink-0">
                 <span
                   aria-hidden="true"
@@ -64,7 +64,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
       <input
         type={type}
         className={cn(
-          "flex w-full rounded-[2px] border-2 border-foreground bg-card px-4 py-3 text-sm text-foreground shadow-[4px_4px_0_rgba(17,17,17,0.08)] transition-[box-shadow,transform,border-color,background-color] duration-200 ease-out placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          "paper-field-focus flex w-full rounded-[2px] border-2 border-foreground bg-card px-4 py-3 text-sm text-foreground shadow-[4px_4px_0_rgba(17,17,17,0.08)] placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
           "h-12 px-4 py-3",
           className,
         )}

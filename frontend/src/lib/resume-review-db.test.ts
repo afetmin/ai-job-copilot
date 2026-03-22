@@ -13,13 +13,14 @@ import {
 } from "./resume-review-db";
 
 afterEach(async () => {
+  window.sessionStorage.clear();
   await clearResumeReviewDatabase();
 });
 
 describe("resume-review-db", () => {
   it("saves and loads provider settings", async () => {
     const savedSettings = await saveProviderSettings({
-      provider: "openai",
+      protocol: "openai_compatible",
       apiKey: "sk-test-123",
       model: "gpt-4.1-mini",
       baseUrl: "https://api.openai.com/v1",
@@ -27,6 +28,19 @@ describe("resume-review-db", () => {
 
     expect(savedSettings.id).toBe("current");
     expect(await getProviderSettings()).toEqual(savedSettings);
+  });
+
+  it("clears provider settings from the current session", async () => {
+    await saveProviderSettings({
+      protocol: "openai_compatible",
+      apiKey: "sk-test-123",
+      model: "gpt-4.1-mini",
+      baseUrl: "https://api.openai.com/v1",
+    });
+
+    await clearResumeReviewDatabase();
+
+    await expect(getProviderSettings()).resolves.toBeNull();
   });
 
   it("returns resume reviews in reverse updatedAt order", async () => {

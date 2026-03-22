@@ -41,6 +41,8 @@ describe("PreparedReview", () => {
     expect(await screen.findByText("req-test-123")).toBeInTheDocument();
     expect(screen.getByText("resume preview 1")).toBeInTheDocument();
     expect(screen.getByText("jd preview 1")).toBeInTheDocument();
+    expect(screen.getByText("resume preview 1").className).toContain("break-words");
+    expect(screen.getByText("jd preview 1").className).toContain("break-words");
   });
 
   it("falls back when the stored request does not match the current request", async () => {

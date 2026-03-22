@@ -15,6 +15,7 @@ dependencies = [
     { name = "chromadb" },
     { name = "dashscope" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-chroma" },
     { name = "langchain-community" },
@@ -29,7 +30,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -40,6 +40,7 @@ requires-dist = [
     { name = "chromadb", specifier = ">=1.1.0,<2.0.0" },
     { name = "dashscope", specifier = ">=1.24.0,<2.0.0" },
     { name = "fastapi", specifier = ">=0.116.0,<1.0.0" },
+    { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "langchain", specifier = ">=0.3.27,<1.0.0" },
     { name = "langchain-chroma", specifier = ">=0.2.6,<1.0.0" },
     { name = "langchain-community", specifier = ">=0.3.31,<1.0.0" },
@@ -54,7 +55,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1,<1.0.0" },
     { name = "mypy", specifier = ">=1.18.2,<2.0.0" },
     { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
     { name = "ruff", specifier = ">=0.13.2,<1.0.0" },

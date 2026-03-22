@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createResumeReviewAccessCookie,
-  parseResumeReviewAccessCookie,
   RESUME_REVIEW_ACCESS_COOKIE_NAME,
 } from "@/lib/resume-review-access";
+import {
+  createResumeReviewAccessCookie,
+  parseResumeReviewAccessCookie,
+} from "@/lib/resume-review-access-cookie";
 
 import { POST } from "./route";
 
@@ -99,10 +101,10 @@ describe("POST /api/resume-reviews/chat", () => {
           targetRole: "Backend Engineer",
           messages: [{ role: "user", content: "请重点改写项目经历。" }],
           localModelSettings: {
-            provider: "dashscope",
+            protocol: "anthropic_compatible",
             apiKey: "user-key",
-            model: "qwen-max",
-            baseUrl: "https://runtime.example/v1",
+            model: "claude-sonnet-4-5",
+            baseUrl: "https://runtime.example",
           },
         }),
       }),
@@ -119,10 +121,10 @@ describe("POST /api/resume-reviews/chat", () => {
       target_role: "Backend Engineer",
       messages: [{ role: "user", content: "请重点改写项目经历。" }],
       runtime_model_config: {
-        provider: "dashscope",
+        protocol: "anthropic_compatible",
         api_key: "user-key",
-        model: "qwen-max",
-        base_url: "https://runtime.example/v1",
+        model: "claude-sonnet-4-5",
+        base_url: "https://runtime.example",
       },
     });
   });
@@ -140,6 +142,32 @@ describe("POST /api/resume-reviews/chat", () => {
           jobDescriptionDocumentId: "jd-001",
           suggestionCount: 5,
           messages: [{ role: "user", content: "先给我整体分析。" }],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats malformed local model settings as absent instead of throwing", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/resume-reviews/chat", {
+        method: "POST",
+        headers: {
+          cookie: `${RESUME_REVIEW_ACCESS_COOKIE_NAME}=${createResumeReviewAccessCookie(0)}`,
+        },
+        body: JSON.stringify({
+          reviewId: "pack-123",
+          resumeDocumentId: "resume-001",
+          jobDescriptionDocumentId: "jd-001",
+          suggestionCount: 5,
+          messages: [{ role: "user", content: "先给我整体分析。" }],
+          localModelSettings: {
+            protocol: 123,
+            apiKey: null,
+            model: "",
+          },
         }),
       }),
     );

@@ -1,13 +1,12 @@
 import { createHmac } from "node:crypto";
 
 import {
-  DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
   RESUME_REVIEW_ACCESS_COOKIE_NAME,
 } from "@/lib/resume-review-access";
+import { getDefaultResumeReviewFreeAnalyses } from "@/lib/env";
 
 const RESUME_REVIEW_ACCESS_COOKIE_VERSION = 1;
-const RESUME_REVIEW_ACCESS_COOKIE_SECRET =
-  process.env.AI_JOB_COPILOT_ACCESS_COOKIE_SECRET ??
+const DEFAULT_RESUME_REVIEW_ACCESS_COOKIE_SECRET =
   "ai-job-copilot-resume-review-access-secret";
 
 type ResumeReviewAccessCookiePayload = {
@@ -25,14 +24,27 @@ function base64UrlDecode(rawValue: string): string {
 }
 
 function signPayload(encodedPayload: string): string {
-  return createHmac("sha256", RESUME_REVIEW_ACCESS_COOKIE_SECRET)
+  return createHmac("sha256", getResumeReviewAccessCookieSecret())
     .update(encodedPayload)
     .digest("base64url");
 }
 
+function getResumeReviewAccessCookieSecret(): string {
+  const secret = process.env.AI_JOB_COPILOT_ACCESS_COOKIE_SECRET;
+  if (typeof secret === "string" && secret.trim() !== "") {
+    return secret;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AI_JOB_COPILOT_ACCESS_COOKIE_SECRET must be set in production");
+  }
+
+  return DEFAULT_RESUME_REVIEW_ACCESS_COOKIE_SECRET;
+}
+
 function normalizeRemainingFreeAnalyses(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    return DEFAULT_RESUME_REVIEW_FREE_ANALYSES;
+    return getDefaultResumeReviewFreeAnalyses();
   }
 
   return value;
@@ -92,7 +104,7 @@ export function parseResumeReviewAccessCookie(
 }
 
 export function createResumeReviewAccessCookie(
-  remainingFreeAnalyses = DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
+  remainingFreeAnalyses = getDefaultResumeReviewFreeAnalyses(),
 ): string {
   return serializeResumeReviewAccessCookie({
     version: RESUME_REVIEW_ACCESS_COOKIE_VERSION,
@@ -102,7 +114,7 @@ export function createResumeReviewAccessCookie(
 }
 
 export function createResumeReviewAccessCookieHeader(
-  remainingFreeAnalyses = DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
+  remainingFreeAnalyses = getDefaultResumeReviewFreeAnalyses(),
 ): {
   name: string;
   value: string;

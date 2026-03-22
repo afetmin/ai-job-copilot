@@ -1,4 +1,5 @@
 import {
+  afterEach,
   describe,
   expect,
   it,
@@ -7,6 +8,7 @@ import {
 
 import {
   buildResumeReviewAccessResponse,
+  fetchResumeReviewAccessStatus,
   shouldBlockResumeReviewCreation,
 } from "./resume-review-access";
 import {
@@ -15,6 +17,12 @@ import {
 } from "./resume-review-access-cookie";
 
 describe("resume-review-access", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("round-trips signed access cookies", () => {
     vi.useFakeTimers();
     try {
@@ -38,6 +46,15 @@ describe("resume-review-access", () => {
     expect(parseResumeReviewAccessCookie(`${cookieValue}tamper`)).toBeNull();
   });
 
+  it("requires explicit cookie secret in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AI_JOB_COPILOT_ACCESS_COOKIE_SECRET", "");
+
+    expect(() => createResumeReviewAccessCookie(1)).toThrow(
+      "AI_JOB_COPILOT_ACCESS_COOKIE_SECRET must be set in production",
+    );
+  });
+
   it("blocks only when free quota is exhausted and no local provider settings exist", () => {
     expect(
       shouldBlockResumeReviewCreation({
@@ -55,8 +72,28 @@ describe("resume-review-access", () => {
       }),
     ).toBe(false);
 
-    expect(buildResumeReviewAccessResponse(2)).toEqual({
-      remainingFreeAnalyses: 2,
+    expect(buildResumeReviewAccessResponse(10)).toEqual({
+      remainingFreeAnalyses: 10,
+      requiresUserModelConfig: false,
+    });
+  });
+
+  it("falls back to the configured default quota when the response payload is malformed", async () => {
+    vi.stubEnv("AI_JOB_COPILOT_RESUME_REVIEW_FREE_ANALYSES", "14");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ remainingFreeAnalyses: "bad-value" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        }),
+      ),
+    );
+
+    await expect(fetchResumeReviewAccessStatus()).resolves.toEqual({
+      remainingFreeAnalyses: 14,
       requiresUserModelConfig: false,
     });
   });

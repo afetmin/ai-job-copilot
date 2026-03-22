@@ -127,13 +127,15 @@ export function PreparedReview({ requestId }: PreparedReviewProps) {
         <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
           简历摘要
         </p>
-        <p className="mt-2 text-sm leading-6 text-foreground">{preparedRequest.resumePreview}</p>
+        <p className="mt-2 break-words text-sm leading-6 text-foreground [overflow-wrap:anywhere]">
+          {preparedRequest.resumePreview}
+        </p>
       </div>
       <div className="border-2 border-foreground bg-card p-4 shadow-[4px_4px_0_#161616]">
         <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
           JD 摘要
         </p>
-        <p className="mt-2 text-sm leading-6 text-foreground">
+        <p className="mt-2 break-words text-sm leading-6 text-foreground [overflow-wrap:anywhere]">
           {preparedRequest.jobDescriptionPreview}
         </p>
       </div>

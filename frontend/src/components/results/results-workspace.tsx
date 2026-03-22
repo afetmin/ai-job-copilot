@@ -1,24 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, MessagesSquare, Settings2 } from "lucide-react";
+import { ArrowUpRight, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 
 import { AnalysisChatPanel } from "@/components/results/analysis-chat-panel";
 import { ConversationList } from "@/components/results/conversation-list";
-import { ModelSettingsCard } from "@/components/results/model-settings-card";
 import { readPreparedRequest } from "@/components/results/prepared-review";
-import { Button } from "@/components/ui/button";
 import {
+  deleteChatMessage,
   deleteResumeReview,
   getProviderSettings,
   listResumeReviews,
   listMessagesForReview,
-  saveProviderSettings,
   type ChatMessageRecord,
   type ResumeReviewCitation,
   type ResumeReviewRecord,
-  type ProviderSettingsInput,
   type ProviderSettingsRecord,
   upsertChatMessage,
   upsertResumeReview,
@@ -47,6 +44,7 @@ type ResumeReviewChatSseEnvelope = {
     source_type?: "resume" | "job_description";
     title?: string;
     excerpt?: string;
+    relevance_level?: "high" | "medium" | "low";
     score?: number;
   };
   delta?: string;
@@ -54,6 +52,7 @@ type ResumeReviewChatSseEnvelope = {
 };
 
 const INITIAL_REVIEW_PROMPT = "请先给我这份简历针对目标岗位的整体分析和修改建议。";
+const INTERRUPTED_FOLLOW_UP_MESSAGE = "本次追问已中断，请重新发送。";
 
 function replaceMessage(messages: ChatMessageRecord[], nextMessage: ChatMessageRecord) {
   const targetIndex = messages.findIndex((message) => message.messageId === nextMessage.messageId);
@@ -62,6 +61,10 @@ function replaceMessage(messages: ChatMessageRecord[], nextMessage: ChatMessageR
   }
 
   return messages.map((message, index) => (index === targetIndex ? nextMessage : message));
+}
+
+function removeMessage(messages: ChatMessageRecord[], messageId: string) {
+  return messages.filter((message) => message.messageId !== messageId);
 }
 
 function parseCitation(event: ResumeReviewChatSseEnvelope["citation"]): ResumeReviewCitation | null {
@@ -80,6 +83,7 @@ function parseCitation(event: ResumeReviewChatSseEnvelope["citation"]): ResumeRe
     sourceType: event.source_type,
     title: event.title,
     snippet: event.excerpt,
+    relevanceLevel: event.relevance_level,
     score: event.score,
   };
 }
@@ -140,6 +144,24 @@ function buildChatRequestMessages(messages: ChatMessageRecord[]) {
     }));
 }
 
+function appendEphemeralUserMessage(
+  messages: ReturnType<typeof buildChatRequestMessages>,
+  userMessageContent: string,
+) {
+  const trimmedUserMessage = userMessageContent.trim();
+  if (trimmedUserMessage === "") {
+    return messages;
+  }
+
+  return [
+    ...messages,
+    {
+      role: "user" as const,
+      content: trimmedUserMessage,
+    },
+  ];
+}
+
 export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
   const [packs, setPacks] = useState<ResumeReviewRecord[]>([]);
   const [activePackId, setActivePackId] = useState<string | null>(null);
@@ -147,15 +169,19 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
   const [hydratedPackId, setHydratedPackId] = useState<string | null>(null);
   const [providerSettings, setProviderSettings] = useState<ProviderSettingsRecord | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [isModelSettingsOpen, setIsModelSettingsOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const packsRef = useRef<ResumeReviewRecord[]>([]);
+  const activePackIdRef = useRef<string | null>(null);
   const inFlightPackIdRef = useRef<string | null>(null);
   const activeChatRequestRef = useRef<ActiveChatRequest | null>(null);
 
   useEffect(() => {
     packsRef.current = packs;
   }, [packs]);
+
+  useEffect(() => {
+    activePackIdRef.current = activePackId;
+  }, [activePackId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,6 +260,7 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
       setWorkspaceError(null);
       return;
     }
+    const activePackIdValue = activePackId;
 
     let cancelled = false;
     setMessages([]);
@@ -241,7 +268,7 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
     setWorkspaceError(null);
 
     async function loadMessages() {
-      const activePack = packsRef.current.find((pack) => pack.reviewId === activePackId);
+      const activePack = packsRef.current.find((pack) => pack.reviewId === activePackIdValue);
       if (activePack) {
         await upsertResumeReview({
           ...activePack,
@@ -250,7 +277,7 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
       }
 
       const [nextMessages, nextPacks] = await Promise.all([
-        listMessagesForReview(activePackId),
+        listMessagesForReview(activePackIdValue),
         listResumeReviews(),
       ]);
 
@@ -259,7 +286,7 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
       }
 
       setMessages(nextMessages);
-      setHydratedPackId(activePackId);
+      setHydratedPackId(activePackIdValue);
       setPacks(nextPacks);
     }
 
@@ -267,31 +294,16 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
 
     return () => {
       cancelled = true;
-      if (activeChatRequestRef.current?.packId === activePackId) {
+      if (activeChatRequestRef.current?.packId === activePackIdValue) {
         activeChatRequestRef.current.abortController.abort();
         activeChatRequestRef.current = null;
-        if (inFlightPackIdRef.current === activePackId) {
+        if (inFlightPackIdRef.current === activePackIdValue) {
           inFlightPackIdRef.current = null;
         }
         setIsSending(false);
       }
     };
   }, [activePackId]);
-
-  useEffect(() => {
-    if (!isModelSettingsOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsModelSettingsOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isModelSettingsOpen]);
 
   const activePack = activePackId
     ? packs.find((pack) => pack.reviewId === activePackId) ?? null
@@ -328,8 +340,9 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
     };
 
     let requestMessages = currentMessages;
+    let requestPayloadMessages = buildChatRequestMessages(currentMessages);
     const trimmedUserMessage = userMessageContent.trim();
-    if (trimmedUserMessage !== "") {
+    if (trimmedUserMessage !== "" && assistantKind === "follow_up") {
       const userMessage = await upsertChatMessage({
         messageId: `user:${pack.reviewId}:${Date.now()}`,
         reviewId: pack.reviewId,
@@ -340,7 +353,10 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
         citations: [],
       });
       requestMessages = [...currentMessages, userMessage];
+      requestPayloadMessages = buildChatRequestMessages(requestMessages);
       setMessages((existingMessages) => replaceMessage(existingMessages, userMessage));
+    } else {
+      requestPayloadMessages = appendEphemeralUserMessage(requestPayloadMessages, trimmedUserMessage);
     }
 
     let assistantMessage = await upsertChatMessage({
@@ -375,12 +391,12 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
           jobDescriptionDocumentId: pack.jobDescriptionDocumentId,
           suggestionCount: pack.suggestionCount,
           targetRole: pack.targetRole,
-          messages: buildChatRequestMessages(requestMessages),
+          messages: requestPayloadMessages,
           localModelSettings:
             providerSettings === null
               ? null
               : {
-                  provider: providerSettings.provider,
+                  protocol: providerSettings.protocol,
                   apiKey: providerSettings.apiKey,
                   model: providerSettings.model,
                   baseUrl: providerSettings.baseUrl,
@@ -483,9 +499,78 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
           setPacks(await listResumeReviews());
         }
       });
+
+      if (isActiveChatRequest(requestKey, pack.reviewId) && assistantMessage.status === "streaming") {
+        const errorMessage =
+          assistantKind === "initial_analysis"
+            ? "初始分析生成失败，请稍后重试。"
+            : "追问发送失败，请稍后重试。";
+        assistantMessage = await upsertChatMessage({
+          ...assistantMessage,
+          status: "error",
+          content: assistantMessage.content || errorMessage,
+          updatedAt: Date.now(),
+        });
+        await upsertResumeReview({
+          ...pack,
+          analysisStatus: "error",
+          updatedAt: Date.now(),
+        });
+        setMessages((existingMessages) => replaceMessage(existingMessages, assistantMessage));
+        setPacks(await listResumeReviews());
+        setWorkspaceError(errorMessage);
+      }
     } catch {
       const wasAborted = abortController.signal.aborted;
       if (wasAborted) {
+        if (assistantKind === "initial_analysis") {
+          await deleteChatMessage(assistantMessage.messageId);
+          await upsertResumeReview({
+            ...pack,
+            analysisStatus: "pending",
+            updatedAt: Date.now(),
+          });
+          if (activePackIdRef.current === pack.reviewId) {
+            const [nextMessages, nextPacks] = await Promise.all([
+              listMessagesForReview(pack.reviewId),
+              listResumeReviews(),
+            ]);
+            const visibleMessages = removeMessage(nextMessages, assistantMessage.messageId);
+            const nextPack =
+              nextPacks.find((candidate) => candidate.reviewId === pack.reviewId) ?? {
+                ...pack,
+                analysisStatus: "pending" as const,
+              };
+            setMessages(visibleMessages);
+            setHydratedPackId(pack.reviewId);
+            setPacks(nextPacks);
+            if (visibleMessages.length === 0) {
+              await startChatTurn(nextPack, [], INITIAL_REVIEW_PROMPT, "initial_analysis");
+            }
+          }
+        } else {
+          assistantMessage = await upsertChatMessage({
+            ...assistantMessage,
+            status: "error",
+            content: assistantMessage.content || INTERRUPTED_FOLLOW_UP_MESSAGE,
+            updatedAt: Date.now(),
+          });
+          await upsertResumeReview({
+            ...pack,
+            analysisStatus: "error",
+            updatedAt: Date.now(),
+          });
+          if (activePackIdRef.current === pack.reviewId) {
+            const [nextMessages, nextPacks] = await Promise.all([
+              listMessagesForReview(pack.reviewId),
+              listResumeReviews(),
+            ]);
+            setMessages(nextMessages);
+            setHydratedPackId(pack.reviewId);
+            setPacks(nextPacks);
+            setWorkspaceError(INTERRUPTED_FOLLOW_UP_MESSAGE);
+          }
+        }
         return;
       }
 
@@ -524,17 +609,18 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
     if (activePack === null || hydratedPackId !== activePack.reviewId) {
       return;
     }
+    const activePackValue = activePack;
 
-    if (messages.length > 0 || inFlightPackIdRef.current === activePack.reviewId) {
+    if (messages.length > 0 || inFlightPackIdRef.current === activePackValue.reviewId) {
       return;
     }
 
     async function startInitialChat() {
-      await startChatTurn(activePack, [], INITIAL_REVIEW_PROMPT, "initial_analysis");
+      await startChatTurn(activePackValue, [], INITIAL_REVIEW_PROMPT, "initial_analysis");
     }
 
     void startInitialChat();
-  }, [activePack, hydratedPackId, messages, providerSettings]);
+  }, [activePack, hydratedPackId, isSending, messages, providerSettings]);
 
   async function handleSendMessage(message: string) {
     if (activePack === null) {
@@ -544,55 +630,37 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
     await startChatTurn(activePack, messages, message, "follow_up");
   }
 
-  async function handleSaveProviderSettings(input: ProviderSettingsInput) {
-    await saveProviderSettings(input);
-    setProviderSettings(await getProviderSettings());
-  }
-
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-[1320px] px-4 py-6 sm:px-6 lg:px-8">
-        <div className="flex justify-end">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => setIsModelSettingsOpen(true)} size="lg" type="button" variant="secondary">
-              <span className="flex items-center gap-2">
-                <Settings2 className="h-4 w-4" strokeWidth={1.5} />
-                模型配置
-              </span>
-            </Button>
-            <Link
-              className="inline-flex items-center gap-2 border-2 border-foreground bg-[#161616] px-4 py-3 font-mono text-[0.78rem] uppercase tracking-[0.08em] text-[#f7f2ea] shadow-[4px_4px_0_#161616]"
-              href="/workspace"
-            >
-              返回工作台
-              <ArrowUpRight className="h-4 w-4" strokeWidth={1.5} />
-            </Link>
-          </div>
-        </div>
+      <div className="mx-auto max-w-[1320px] px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
+        <section className="border-2 border-foreground bg-card px-5 py-3 shadow-[6px_6px_0_#161616] sm:px-6 sm:py-3.5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="font-mono text-[1.02rem] uppercase tracking-[0.06em] text-foreground sm:text-[1.08rem]">
+              简历分析工作台
+            </h1>
 
-        <section className="mt-5 grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
-            <section className="border-2 border-foreground bg-card p-5 shadow-[5px_5px_0_#161616]">
+            <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+              <Link
+                className="inline-flex items-center gap-2 border-2 border-foreground bg-[#161616] px-4 py-3 font-mono text-[0.78rem] uppercase tracking-[0.08em] text-[#f7f2ea] shadow-[4px_4px_0_#161616]"
+                href="/workspace"
+              >
+                返回工作台
+                <ArrowUpRight className="h-4 w-4" strokeWidth={1.5} />
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-4 grid gap-5 xl:items-stretch xl:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="min-h-0 space-y-5 xl:sticky xl:top-5 xl:h-[calc(100dvh-9.1rem)] xl:self-start">
+            <section className="flex h-full min-h-0 flex-col overflow-hidden border-2 border-foreground bg-card p-4 shadow-[5px_5px_0_#161616]">
               <div className="flex items-center gap-2">
                 <MessagesSquare className="h-4 w-4" strokeWidth={1.5} />
                 <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
                   对话列表
                 </p>
               </div>
-              <div className="mt-4 space-y-4">
-                <div className="border-2 border-foreground/10 bg-[rgba(255,255,255,0.5)] p-4">
-                  <p className="font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
-                    当前对话
-                  </p>
-                  <p className="mt-2 font-mono text-[0.88rem] uppercase tracking-[0.08em]">
-                    {activePack?.targetRole ?? "未命名岗位"}
-                  </p>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    {packs.length > 0
-                      ? `当前共 ${packs.length} 个对话，右侧会按时间顺序展示所选对话的全部消息。`
-                      : "当前还没有可浏览的对话内容。"}
-                  </p>
-                </div>
+              <div className="mt-3 flex min-h-0 flex-1 flex-col">
                 <ConversationList
                   activeReviewId={activePackId}
                   reviews={packs}
@@ -600,18 +668,9 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
                 />
               </div>
             </section>
-
-            <section className="border-2 border-foreground bg-[rgba(251,247,242,0.94)] p-4 shadow-[5px_5px_0_#161616]">
-              <p className="font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
-                结果页工作区
-              </p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                左侧按档案切换对话，右侧在同一聊天流里连续展示初始信息、追问和后续回复。
-              </p>
-            </section>
           </aside>
 
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-5 xl:sticky xl:top-5 xl:self-start">
             <AnalysisChatPanel
               isSending={isSending}
               messages={messages}
@@ -622,42 +681,6 @@ export function ResultsWorkspace({ requestId }: ResultsWorkspaceProps) {
             />
           </div>
         </section>
-
-        {isModelSettingsOpen ? (
-          <div
-            aria-modal="true"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4 py-6"
-            role="dialog"
-          >
-            <button
-              aria-label="关闭模型配置弹窗"
-              className="absolute inset-0"
-              onClick={() => setIsModelSettingsOpen(false)}
-              type="button"
-            />
-            <div className="relative z-10 w-full max-w-[560px] border-2 border-foreground bg-[rgba(251,247,242,0.98)] p-5 shadow-[10px_10px_0_#161616] sm:p-6">
-              <div className="flex items-start justify-between gap-4 border-b-2 border-foreground/10 pb-4">
-                <div>
-                  <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
-                    模型配置
-                  </p>
-                  <h2 className="mt-2 font-mono text-[1.2rem] uppercase tracking-[0.08em]">
-                    本机模型设置
-                  </h2>
-                </div>
-                <Button onClick={() => setIsModelSettingsOpen(false)} size="sm" type="button" variant="ghost">
-                  关闭
-                </Button>
-              </div>
-              <div className="mt-5">
-                <ModelSettingsCard
-                  onSave={handleSaveProviderSettings}
-                  settings={providerSettings}
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     </main>
   );

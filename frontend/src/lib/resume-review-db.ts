@@ -2,9 +2,13 @@ import Dexie, { type Table } from "dexie";
 
 export const RESUME_REVIEW_DB_NAME = "ai-job-copilot-resume-review-db";
 export const RESUME_REVIEW_PROVIDER_SETTINGS_ID = "current";
+export const RESUME_REVIEW_PROVIDER_SETTINGS_SESSION_KEY =
+  "ai-job-copilot-resume-review-provider-settings";
+
+export type ModelProtocol = "openai_compatible" | "anthropic_compatible";
 
 export type ProviderSettingsInput = {
-  provider: string;
+  protocol: ModelProtocol;
   apiKey: string;
   model: string;
   baseUrl?: string | null;
@@ -12,7 +16,7 @@ export type ProviderSettingsInput = {
 
 export type ProviderSettingsRecord = {
   id: typeof RESUME_REVIEW_PROVIDER_SETTINGS_ID;
-  provider: string;
+  protocol: ModelProtocol;
   apiKey: string;
   model: string;
   baseUrl: string | null;
@@ -25,6 +29,7 @@ export type ResumeReviewCitation = {
   sourceType: "resume" | "job_description";
   title: string;
   snippet: string;
+  relevanceLevel?: "high" | "medium" | "low";
   score?: number;
 };
 
@@ -108,6 +113,8 @@ class ResumeReviewDatabase extends Dexie {
 
 export const resumeReviewDatabase = new ResumeReviewDatabase();
 
+type SessionStorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
 function normalizeOptionalText(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -125,7 +132,51 @@ function now(): number {
   return Date.now();
 }
 
+function getSessionStorage(): SessionStorageLike | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.sessionStorage;
+}
+
+function parseStoredProviderSettings(
+  rawValue: string | null,
+): ProviderSettingsRecord | null {
+  if (rawValue === null) {
+    return null;
+  }
+
+  try {
+    const candidate = JSON.parse(rawValue) as Partial<ProviderSettingsRecord>;
+    if (
+      candidate.id !== RESUME_REVIEW_PROVIDER_SETTINGS_ID ||
+      (candidate.protocol !== "openai_compatible" &&
+        candidate.protocol !== "anthropic_compatible") ||
+      typeof candidate.apiKey !== "string" ||
+      typeof candidate.model !== "string" ||
+      typeof candidate.createdAt !== "number" ||
+      typeof candidate.updatedAt !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      id: RESUME_REVIEW_PROVIDER_SETTINGS_ID,
+      protocol: candidate.protocol,
+      apiKey: normalizeRequiredText(candidate.apiKey),
+      model: normalizeRequiredText(candidate.model),
+      baseUrl: normalizeOptionalText(candidate.baseUrl),
+      createdAt: candidate.createdAt,
+      updatedAt: candidate.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function clearResumeReviewDatabase(): Promise<void> {
+  getSessionStorage()?.removeItem(RESUME_REVIEW_PROVIDER_SETTINGS_SESSION_KEY);
   await Promise.all([
     resumeReviewDatabase.provider_settings.clear(),
     resumeReviewDatabase.resume_reviews.clear(),
@@ -136,12 +187,13 @@ export async function clearResumeReviewDatabase(): Promise<void> {
 export async function saveProviderSettings(
   input: ProviderSettingsInput,
 ): Promise<ProviderSettingsRecord> {
-  const existing = await resumeReviewDatabase.provider_settings.get(
-    RESUME_REVIEW_PROVIDER_SETTINGS_ID,
+  const storage = getSessionStorage();
+  const existing = parseStoredProviderSettings(
+    storage?.getItem(RESUME_REVIEW_PROVIDER_SETTINGS_SESSION_KEY) ?? null,
   );
   const record: ProviderSettingsRecord = {
     id: RESUME_REVIEW_PROVIDER_SETTINGS_ID,
-    provider: normalizeRequiredText(input.provider),
+    protocol: input.protocol,
     apiKey: normalizeRequiredText(input.apiKey),
     model: normalizeRequiredText(input.model),
     baseUrl: normalizeOptionalText(input.baseUrl),
@@ -149,16 +201,16 @@ export async function saveProviderSettings(
     updatedAt: now(),
   };
 
-  await resumeReviewDatabase.provider_settings.put(record);
+  storage?.setItem(RESUME_REVIEW_PROVIDER_SETTINGS_SESSION_KEY, JSON.stringify(record));
   return record;
 }
 
 export async function getProviderSettings(): Promise<ProviderSettingsRecord | null> {
-  return (
-    (await resumeReviewDatabase.provider_settings.get(
-      RESUME_REVIEW_PROVIDER_SETTINGS_ID,
-    )) ?? null
+  const storage = getSessionStorage();
+  const parsed = parseStoredProviderSettings(
+    storage?.getItem(RESUME_REVIEW_PROVIDER_SETTINGS_SESSION_KEY) ?? null,
   );
+  return parsed;
 }
 
 export async function upsertResumeReview(input: ResumeReviewInput): Promise<ResumeReviewRecord> {
@@ -214,6 +266,10 @@ export async function upsertChatMessage(input: ChatMessageInput): Promise<ChatMe
 
   await resumeReviewDatabase.chat_messages.put(record);
   return record;
+}
+
+export async function deleteChatMessage(messageId: string): Promise<void> {
+  await resumeReviewDatabase.chat_messages.delete(normalizeRequiredText(messageId));
 }
 
 export async function listMessagesForReview(reviewId: string): Promise<ChatMessageRecord[]> {

@@ -14,6 +14,7 @@ from ai_job_copilot_backend.retrieval.service import RetrievalService
 from ai_job_copilot_backend.schemas.documents import DocumentType
 from ai_job_copilot_backend.schemas.resume_review import (
     GeneratedResumeReview,
+    RelevanceLevel,
     ResumeReviewAnalysisMetadata,
     ResumeReviewAnalysisRequest,
     ResumeReviewAnalysisStreamEvent,
@@ -96,6 +97,20 @@ def _build_job_description_query(request: ResumeReviewContextRequest) -> str:
         return f"{target_role} {latest_user_message} 岗位职责 技术要求 任职要求 业务目标"
 
     return f"{target_role} 岗位职责 技术要求 任职要求 业务目标"
+
+
+def _distance_to_relevance_level(distance: float | None) -> RelevanceLevel | None:
+    """把 Chroma 返回的距离值映射成用户可读的相关度等级。"""
+
+    if distance is None:
+        return None
+
+    # Chroma cosine distance: lower is better.
+    if distance <= 0.35:
+        return "high"
+    if distance <= 0.65:
+        return "medium"
+    return "low"
 
 
 async def _load_contexts(
@@ -638,6 +653,7 @@ class ResumeReviewAnalysisService:
                         title=title,
                         excerpt=chunk.content,
                         score=chunk.score,
+                        relevance_level=_distance_to_relevance_level(chunk.score),
                     )
                 )
         return citations

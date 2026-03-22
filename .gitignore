@@ -8,3 +8,5 @@ __pycache__/
 /docs/**
 backend/.env
 .playwright-cli
+backend/data/chroma_db/
+frontend/tsconfig.tsbuildinfo

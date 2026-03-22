@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MessageSquareText, SendHorizontal } from "lucide-react";
 
 import type { ChatMessageRecord, ResumeReviewRecord } from "@/lib/resume-review-db";
@@ -21,18 +21,18 @@ type AnalysisChatPanelProps = {
 
 function formatStatus(status: ResumeReviewRecord["analysisStatus"] | undefined): string {
   if (status === "completed") {
-    return "READY";
+    return "已完成";
   }
 
   if (status === "streaming") {
-    return "STREAMING";
+    return "生成中";
   }
 
   if (status === "error") {
-    return "ERROR";
+    return "异常";
   }
 
-  return "PENDING";
+  return "待开始";
 }
 
 function totalCitations(messages: ChatMessageRecord[]): number {
@@ -62,7 +62,18 @@ export function AnalysisChatPanel({
   onSend,
 }: AnalysisChatPanelProps) {
   const [draft, setDraft] = useState("");
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const metadataItems = infoItems(review, messages, requestId);
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+
+    if (!scrollContainer) {
+      return;
+    }
+
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  }, [isSending, messages]);
 
   async function handleSend() {
     const nextMessage = draft.trim();
@@ -75,8 +86,8 @@ export function AnalysisChatPanel({
   }
 
   return (
-    <section className="flex min-h-[720px] flex-col overflow-hidden border-2 border-foreground bg-card shadow-[6px_6px_0_#161616]">
-      <div className="border-b-2 border-foreground/10 px-5 py-4">
+    <section className="flex h-[calc(100dvh-8.8rem)] min-h-0 min-w-0 flex-col overflow-hidden border-2 border-foreground bg-card shadow-[6px_6px_0_#161616] sm:h-[calc(100dvh-9.1rem)]">
+      <div className="shrink-0 border-b-2 border-foreground/10 px-4 py-3">
         <div className="flex items-center gap-2">
           <MessageSquareText className="h-4 w-4" strokeWidth={1.5} />
           <p className="font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
@@ -84,16 +95,16 @@ export function AnalysisChatPanel({
           </p>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           {metadataItems.map((item) => (
             <div
               key={item.label}
-              className="border border-foreground/15 bg-[rgba(255,255,255,0.5)] px-3 py-2.5"
+              className="border border-foreground/15 bg-[rgba(255,255,255,0.5)] px-3 py-2"
             >
               <p className="font-mono text-[0.64rem] uppercase tracking-[0.08em] text-muted-foreground">
                 {item.label}
               </p>
-              <p className="mt-1.5 line-clamp-2 font-mono text-[0.76rem] uppercase tracking-[0.06em]">
+              <p className="mt-1 line-clamp-1 font-mono text-[0.74rem] uppercase tracking-[0.06em]">
                 {item.value}
               </p>
             </div>
@@ -101,7 +112,11 @@ export function AnalysisChatPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-[linear-gradient(rgba(22,22,22,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(22,22,22,0.06)_1px,transparent_1px)] bg-[size:28px_28px] px-5 py-5">
+      <div
+        aria-label="分析消息流"
+        className="paper-scrollbar min-h-0 flex-1 overflow-y-auto bg-[linear-gradient(rgba(22,22,22,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(22,22,22,0.06)_1px,transparent_1px)] bg-[size:28px_28px] px-4 py-4"
+        ref={scrollContainerRef}
+      >
         {workspaceError ? (
           <div className="mb-4 border-2 border-destructive bg-card px-4 py-3 text-sm leading-6 text-destructive shadow-[4px_4px_0_#161616]">
             {workspaceError}
@@ -110,12 +125,8 @@ export function AnalysisChatPanel({
 
         {messages.length > 0 ? (
           <div className="space-y-3">
-            {messages.map((message, index) => (
-              <ChatMessage
-                index={message.kind === "initial_analysis" ? 0 : index}
-                key={message.messageId}
-                message={message}
-              />
+            {messages.map((message) => (
+              <ChatMessage key={message.messageId} message={message} />
             ))}
           </div>
         ) : (
@@ -125,17 +136,17 @@ export function AnalysisChatPanel({
         )}
       </div>
 
-      <div className="sticky bottom-0 border-t-2 border-foreground bg-[rgba(251,247,242,0.98)] px-5 py-4">
-        <div className="rounded-[2px] border-2 border-foreground bg-background p-3 shadow-[4px_4px_0_#161616]">
+      <div className="shrink-0 border-t-2 border-foreground bg-[rgba(251,247,242,0.98)] px-4 py-3">
+        <div className="rounded-[2px] border-2 border-foreground bg-background p-2.5 shadow-[4px_4px_0_#161616]">
           <label
-            className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-muted-foreground"
+            className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-muted-foreground"
             htmlFor="results-chat-input"
           >
             输入修改追问
           </label>
-          <div className="mt-3 flex items-end gap-3">
+          <div className="mt-2.5 flex items-end gap-2.5">
             <Textarea
-              className="min-h-[84px] resize-none shadow-none"
+              className="min-h-[68px] resize-none px-3 py-2.5 shadow-none"
               id="results-chat-input"
               onChange={(event) => setDraft(event.target.value)}
               placeholder="继续追问这份简历哪里需要修改。"

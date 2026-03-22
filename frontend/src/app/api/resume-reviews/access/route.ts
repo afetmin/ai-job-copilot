@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { getDefaultResumeReviewFreeAnalyses } from "@/lib/env";
 import {
   buildResumeReviewAccessResponse,
-  DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
   RESUME_REVIEW_ACCESS_COOKIE_NAME,
 } from "@/lib/resume-review-access";
 import {
@@ -29,7 +29,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   );
 
   const response = createAccessResponse(
-    cookieValue?.remainingFreeAnalyses ?? DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
+    cookieValue?.remainingFreeAnalyses ?? getDefaultResumeReviewFreeAnalyses(),
   );
 
   if (cookieValue === null) {

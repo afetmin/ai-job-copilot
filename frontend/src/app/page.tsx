@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { EntryGate } from "@/components/auth/entry-gate";
 import { SESSION_COOKIE_NAME, isValidSessionToken } from "@/lib/auth";
 
 export default async function HomePage() {
@@ -11,5 +12,5 @@ export default async function HomePage() {
     redirect("/workspace");
   }
 
-  redirect("/login");
+  return <EntryGate />;
 }

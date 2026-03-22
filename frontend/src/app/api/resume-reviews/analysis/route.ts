@@ -1,13 +1,15 @@
 import { getResumeReviewAnalysisStreamEndpoint } from "@/lib/backend";
+import { getDefaultResumeReviewFreeAnalyses } from "@/lib/env";
+import {
+  RESUME_REVIEW_ACCESS_COOKIE_NAME,
+} from "@/lib/resume-review-access";
 import {
   createResumeReviewAccessCookie,
-  DEFAULT_RESUME_REVIEW_FREE_ANALYSES,
-  RESUME_REVIEW_ACCESS_COOKIE_NAME,
   parseResumeReviewAccessCookie,
-} from "@/lib/resume-review-access";
+} from "@/lib/resume-review-access-cookie";
 
 type RuntimeModelSettings = {
-  provider: string;
+  protocol: string;
   apiKey: string;
   model: string;
   baseUrl?: string | null;
@@ -35,12 +37,18 @@ function getCookieValue(request: Request, name: string): string | null {
 function hasRuntimeModelSettings(
   settings: RuntimeModelSettings | null | undefined,
 ): settings is RuntimeModelSettings {
+  if (typeof settings !== "object" || settings === null) {
+    return false;
+  }
+
+  const { protocol, apiKey, model } = settings;
   return (
-    settings !== null &&
-    settings !== undefined &&
-    settings.provider.trim() !== "" &&
-    settings.apiKey.trim() !== "" &&
-    settings.model.trim() !== ""
+    typeof protocol === "string" &&
+    typeof apiKey === "string" &&
+    typeof model === "string" &&
+    protocol.trim() !== "" &&
+    apiKey.trim() !== "" &&
+    model.trim() !== ""
   );
 }
 
@@ -87,7 +95,7 @@ export async function POST(request: Request): Promise<Response> {
     getCookieValue(request, RESUME_REVIEW_ACCESS_COOKIE_NAME),
   );
   const remainingFreeAnalyses =
-    accessCookie?.remainingFreeAnalyses ?? DEFAULT_RESUME_REVIEW_FREE_ANALYSES;
+    accessCookie?.remainingFreeAnalyses ?? getDefaultResumeReviewFreeAnalyses();
 
   if (runtimeModelSettings === null && remainingFreeAnalyses <= 0) {
     return Response.json(
@@ -120,7 +128,7 @@ export async function POST(request: Request): Promise<Response> {
           runtimeModelSettings === null
             ? null
             : {
-                provider: runtimeModelSettings.provider,
+                protocol: runtimeModelSettings.protocol,
                 api_key: runtimeModelSettings.apiKey,
                 model: runtimeModelSettings.model,
                 base_url: runtimeModelSettings.baseUrl ?? "",
