@@ -4,7 +4,10 @@
 
 ## 操作演示
 
-![操作演示](https://raw.githubusercontent.com/afetmin/ai-job-copilot/main/frontend/demo/demo.mp4)
+
+https://github.com/user-attachments/assets/53c75fc9-bd06-4136-8fc5-875896ada275
+
+
 - 示例素材：
   - `frontend/demo/resume.pdf`
   - `frontend/demo/jd.txt`
