@@ -2,6 +2,14 @@
 
 一个用于简历分析与优化建议生成的全栈项目，包含前端工作台、后端检索与模型推理能力。
 
+## 操作演示
+
+- 演示视频（点击观看）：[frontend/demo/iShot_2026-03-22_11.25.30.mp4](frontend/demo/iShot_2026-03-22_11.25.30.mp4)
+- 说明：GitHub README 对仓库内 `mp4` 内嵌播放支持有限，如未显示播放器，请直接点击上面链接。
+- 示例素材：
+  - `frontend/demo/resume.pdf`
+  - `frontend/demo/jd.txt`
+
 ## 项目结构
 
 ```text
@@ -109,15 +117,3 @@ npm run build
 cd backend
 uv run pytest
 ```
-
-## 操作演示
-
-- 演示视频：
-
-<video src="frontend/demo/iShot_2026-03-22_11.25.30.mp4" controls width="960">
-  你的浏览器不支持内嵌视频，请直接下载查看。
-</video>
-
-- 示例素材：
-  - `frontend/demo/resume.pdf`
-  - `frontend/demo/jd.txt`
